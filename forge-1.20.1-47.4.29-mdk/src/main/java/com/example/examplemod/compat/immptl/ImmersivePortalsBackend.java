@@ -5,6 +5,7 @@ import com.example.examplemod.ExampleMod;
 import com.example.examplemod.transition.FlightTransferCoordinator;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -12,8 +13,11 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -52,12 +56,38 @@ public final class ImmersivePortalsBackend {
             return;
         }
         MinecraftServer server = event.getServer();
+        recoverLowSpacePlayers(server);
         boolean configChanged = installedEnabled != Config.debugElytraSpaceFlight
                 || Double.compare(installedAltitude, Config.flightTransitionAltitude) != 0;
         if (configChanged || server.getTickCount() % 20 == 0) {
             reconcile(server);
         }
         FlightTransferCoordinator.tick(server);
+    }
+
+    private static void recoverLowSpacePlayers(MinecraftServer server) {
+        ServerLevel overworld = server.overworld();
+        for (ServerPlayer player : java.util.List.copyOf(server.getPlayerList().getPlayers())) {
+            if (!player.isAlive() || !player.level().dimension().equals(SPACE_DIMENSION)
+                    || player.getY() >= SPACE_ENTRY_HEIGHT - 24) continue;
+            FlightTransferCoordinator.logout(player);
+            player.stopRiding();
+            BlockPos spawn = overworld.getSharedSpawnPos();
+            int safeY = overworld.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    spawn.getX(), spawn.getZ());
+            PortalAPI.teleportEntity(player, overworld,
+                    new Vec3(spawn.getX() + 0.5, Math.max(safeY, overworld.getMinBuildHeight()) + 1.0, spawn.getZ() + 0.5));
+            player.setDeltaMovement(Vec3.ZERO);
+            player.fallDistance = 0;
+            player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            LOGGER.warn("Recovered player {} below space return boundary", player.getGameProfile().getName());
+        }
+    }
+
+    @SubscribeEvent
+    public static void preventSpaceVoidDamage(LivingAttackEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player && player.level().dimension().equals(SPACE_DIMENSION)
+                && event.getSource().is(DamageTypes.FELL_OUT_OF_WORLD)) event.setCanceled(true);
     }
 
     public static void reconcile(MinecraftServer server) {
@@ -153,6 +183,7 @@ public final class ImmersivePortalsBackend {
     public static void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (event.getEntity() instanceof ServerPlayer player
                 && (event.getFrom().equals(SPACE_DIMENSION) || event.getTo().equals(SPACE_DIMENSION))) {
+            player.fallDistance = 0;
             LOGGER.info("ROCKET dimension change: player={}, {} -> {}, pos={}, velocity={}, fallFlying={}",
                     player.getGameProfile().getName(), event.getFrom().location(), event.getTo().location(),
                     player.position(), player.getDeltaMovement(), player.isFallFlying());

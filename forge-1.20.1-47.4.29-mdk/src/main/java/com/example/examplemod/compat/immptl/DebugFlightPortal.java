@@ -23,7 +23,7 @@ public final class DebugFlightPortal extends Portal {
                 && entity instanceof Player player
                 && player.isAlive()
                 && !player.isSpectator()
-                && player.isFallFlying()
+                && (level().dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION) || player.isFallFlying())
                 && !player.isPassenger()
                 && (level().isClientSide ? FlightNetwork.clientCanCross(player, dimensionTo)
                     : player instanceof ServerPlayer serverPlayer && FlightTransferCoordinator.canCross(serverPlayer, dimensionTo))

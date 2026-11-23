@@ -57,7 +57,7 @@ public final class FlightTransferCoordinator {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             Session session = SESSIONS.get(player.getUUID());
             if (session != null) {
-                if (!enabled || !eligible(player)) {
+                if (!enabled || !player.isAlive() || player.isRemoved()) {
                     abort(player.getUUID(), "flight cancelled", now);
                 } else if (player.level().dimension().equals(session.target)) {
                     restoreGravity(session);
@@ -73,6 +73,8 @@ public final class FlightTransferCoordinator {
                     } else if (now % 10 == 0) {
                         send(player, FlightNetwork.Kind.CONFIRM, session, "confirm destination");
                     }
+                } else if (!eligible(player)) {
+                    abort(player.getUUID(), "flight cancelled", now);
                 } else if (!player.level().dimension().equals(session.source)) {
                     abort(player.getUUID(), "dimension changed externally", now);
                 } else if (now - session.started > PREPARE_TIMEOUT) {
@@ -153,8 +155,8 @@ public final class FlightTransferCoordinator {
 
     private static boolean eligible(ServerPlayer player) {
         return player.isAlive() && !player.isRemoved() && !player.isPassenger() && !player.isSpectator()
-                && player.isFallFlying() && (player.level().dimension().equals(Level.OVERWORLD)
-                || player.level().dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
+                && (player.level().dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION)
+                || player.isFallFlying() && player.level().dimension().equals(Level.OVERWORLD));
     }
 
     private static boolean insideEnvelope(ServerPlayer player, Session session) {
@@ -195,7 +197,7 @@ public final class FlightTransferCoordinator {
                 double boundary = sign > 0 ? threshold : FlightMath.SPACE_ENTRY_HEIGHT;
                 double safeY = boundary - sign * 12 - player.getEyeHeight();
                 player.connection.teleport(player.getX(), safeY, player.getZ(), player.getYRot(), player.getXRot());
-                player.startFallFlying();
+                if (session.wasGliding) player.startFallFlying();
             }
             player.setNoGravity(true);
             player.setDeltaMovement(Vec3.ZERO);
@@ -210,7 +212,6 @@ public final class FlightTransferCoordinator {
         double safeY = (source ? threshold - 16 : FlightMath.SPACE_ENTRY_HEIGHT + 16) - player.getEyeHeight();
         player.connection.teleport(player.getX(), safeY, player.getZ(), player.getYRot(), player.getXRot());
         player.setDeltaMovement(new Vec3(0, source ? -0.1 : 0.1, 0));
-        player.startFallFlying();
         player.hurtMarked = true;
     }
 
@@ -285,6 +286,7 @@ public final class FlightTransferCoordinator {
         final ChunkLoader loader;
         final long started;
         final long sequence;
+        final boolean wasGliding;
         long lastReplySequence;
         long crossedTick;
         boolean clientReady;
@@ -304,6 +306,7 @@ public final class FlightTransferCoordinator {
             this.loader = loader;
             this.started = started;
             this.sequence = sequence;
+            this.wasGliding = player.isFallFlying();
         }
     }
 }

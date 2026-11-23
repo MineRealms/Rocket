@@ -39,8 +39,6 @@ import java.util.Random;
 public final class AltitudeVisuals {
     private static final ResourceLocation OVERWORLD_TYPE = new ResourceLocation("minecraft", "overworld");
     private static final ResourceLocation SPACE_TYPE = new ResourceLocation("rocketmod", "space_type");
-    private static final double PLANET_RADIUS = 1536;
-    private static final PlanetVertex[] PLANET_MESH = createPlanetMesh();
     private static double anchorX;
     private static double anchorZ;
     private static boolean anchored;
@@ -107,11 +105,11 @@ public final class AltitudeVisuals {
                 anchorZ = camera.getPosition().z;
                 anchored = true;
             }
-            float alpha = FlightMath.smoothRange(h, 128, 520);
+            float alpha = FlightMath.smoothRange(h, 128, 320);
             if (!passDimension.equals(Level.OVERWORLD) && !passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION)) return;
             try (RenderState ignored = new RenderState()) {
                 drawSky(event.getPoseStack(), atmosphere(h), event.getRenderTick() + event.getPartialTick());
-                if (alpha > 0.005f) drawPlanet(event.getPoseStack(), camera.getPosition(), space, alpha);
+                if (alpha > 0.005f) OrbitalTerrainRenderer.render(event.getPoseStack(), camera.getPosition(), h, anchorX, anchorZ, alpha);
             }
         }
     }
@@ -234,123 +232,6 @@ public final class AltitudeVisuals {
         RenderSystem.enableCull(); RenderSystem.disableBlend();
     }
 
-    private static void drawPlanet(PoseStack pose, Vec3 camera, boolean space, float alpha) {
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.enableDepthTest();
-        RenderSystem.depthMask(false);
-        RenderSystem.enableCull();
-        BufferBuilder b = Tesselator.getInstance().getBuilder();
-        b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        double altitude = virtualAltitude(camera.y, space) - 64;
-        double scale = 80 / (PLANET_RADIUS + Math.max(1, altitude));
-        pose.pushPose();
-        // Render the distant proxy inside the sky frustum while preserving its angular size.
-        pose.scale((float) scale, (float) scale, (float) scale);
-        pose.translate(anchorX-camera.x,-altitude,anchorZ-camera.z);
-        Matrix4f m = pose.last().pose();
-        for (PlanetVertex v : PLANET_MESH) {
-            vertex(b, m, v.point, v.red, v.green, v.blue, alpha);
-        }
-        BufferUploader.drawWithShader(b.end());
-        pose.popPose();
-        RenderSystem.depthMask(true);
-        RenderSystem.enableCull();
-        RenderSystem.disableBlend();
-    }
-
-    private record PlanetVertex(Vec3 point, float red, float green, float blue) {}
-
-    private static PlanetVertex[] createPlanetMesh() {
-        int latitudes = 64, longitudes = 128;
-        PlanetVertex[][] grid = new PlanetVertex[latitudes + 1][longitudes + 1];
-        for (int lat = 0; lat <= latitudes; lat++) {
-            double latitude = -Math.PI / 2 + Math.PI * lat / latitudes;
-            for (int lon = 0; lon < longitudes; lon++) {
-                double longitude = Math.PI * 2 * lon / longitudes;
-                Vec3 normal = lat == 0 ? new Vec3(0, -1, 0)
-                        : lat == latitudes ? new Vec3(0, 1, 0)
-                        : new Vec3(Math.cos(latitude) * Math.cos(longitude), Math.sin(latitude),
-                                Math.cos(latitude) * Math.sin(longitude));
-                grid[lat][lon] = planetVertex(normal);
-            }
-            grid[lat][longitudes] = grid[lat][0];
-        }
-        PlanetVertex[] triangles = new PlanetVertex[latitudes * longitudes * 6];
-        int next = 0;
-        for (int lat = 0; lat < latitudes; lat++) for (int lon = 0; lon < longitudes; lon++) {
-            triangles[next++] = grid[lat][lon];
-            triangles[next++] = grid[lat + 1][lon];
-            triangles[next++] = grid[lat + 1][lon + 1];
-            triangles[next++] = grid[lat][lon];
-            triangles[next++] = grid[lat + 1][lon + 1];
-            triangles[next++] = grid[lat][lon + 1];
-        }
-        return triangles;
-    }
-
-    private static PlanetVertex planetVertex(Vec3 normal) {
-        // Cartesian noise is continuous at both poles and across the longitude seam.
-        double terrain = planetNoise(normal.x * 3.4 + 11, normal.y * 3.4 - 7, normal.z * 3.4 + 23);
-        float land = FlightMath.smoothRange(terrain, 0.48, 0.55);
-        float shelf = FlightMath.smoothRange(terrain, 0.39, 0.5);
-        float dry = FlightMath.smoothRange(planetNoise(normal.x * 5 - 31, normal.y * 5 + 19,
-                normal.z * 5 + 7) - Math.abs(normal.z) * 0.12, 0.46, 0.61);
-        float mountain = FlightMath.smoothRange(terrain, 0.62, 0.75);
-        float r = Mth.lerp(land, Mth.lerp(shelf, 0.025f, 0.055f), Mth.lerp(dry, 0.16f, 0.57f));
-        float g = Mth.lerp(land, Mth.lerp(shelf, 0.095f, 0.26f), Mth.lerp(dry, 0.34f, 0.49f));
-        float blue = Mth.lerp(land, Mth.lerp(shelf, 0.29f, 0.40f), Mth.lerp(dry, 0.14f, 0.28f));
-        r = Mth.lerp(mountain * land, r, 0.55f);
-        g = Mth.lerp(mountain * land, g, 0.56f);
-        blue = Mth.lerp(mountain * land, blue, 0.54f);
-        float ice = FlightMath.smoothRange(Math.abs(normal.z) + (terrain - 0.5) * 0.14, 0.82, 0.96);
-        r = Mth.lerp(ice, r, 0.79f);
-        g = Mth.lerp(ice, g, 0.88f);
-        blue = Mth.lerp(ice, blue, 0.93f);
-        float cloud = FlightMath.smoothRange(planetNoise(normal.x * 7 + 37, normal.y * 7 + 13,
-                normal.z * 7 - 17), 0.55, 0.68) * 0.68f;
-        r = Mth.lerp(cloud, r, 0.91f);
-        g = Mth.lerp(cloud, g, 0.94f);
-        blue = Mth.lerp(cloud, blue, 0.98f);
-        float light = 0.34f + 0.66f * Math.max(0,
-                (float) (normal.x * 0.45 + normal.y * 0.75 + normal.z * 0.4));
-        Vec3 point = normal.scale(PLANET_RADIUS).add(0, -PLANET_RADIUS, 0);
-        return new PlanetVertex(point, r * light, g * light, blue * light);
-    }
-
-    private static double planetNoise(double x, double y, double z) {
-        double sum = 0, weight = 0.57, total = 0;
-        for (int octave = 0; octave < 4; octave++) {
-            int ix = Mth.floor(x), iy = Mth.floor(y), iz = Mth.floor(z);
-            double fx = noiseFade(x - ix), fy = noiseFade(y - iy), fz = noiseFade(z - iz);
-            double lower = Mth.lerp(fy,
-                    Mth.lerp(fx, noiseCell(ix, iy, iz), noiseCell(ix + 1, iy, iz)),
-                    Mth.lerp(fx, noiseCell(ix, iy + 1, iz), noiseCell(ix + 1, iy + 1, iz)));
-            double upper = Mth.lerp(fy,
-                    Mth.lerp(fx, noiseCell(ix, iy, iz + 1), noiseCell(ix + 1, iy, iz + 1)),
-                    Mth.lerp(fx, noiseCell(ix, iy + 1, iz + 1), noiseCell(ix + 1, iy + 1, iz + 1)));
-            sum += Mth.lerp(fz, lower, upper) * weight;
-            total += weight;
-            x = x * 2.03 + 17.1;
-            y = y * 2.03 - 11.7;
-            z = z * 2.03 + 5.3;
-            weight *= 0.48;
-        }
-        return sum / total;
-    }
-
-    private static double noiseFade(double t) {
-        return t * t * t * (t * (t * 6 - 15) + 10);
-    }
-
-    private static double noiseCell(int x, int y, int z) {
-        long hash = x * 0x632be59bd9b4e019L ^ y * 0x9e3779b97f4a7c15L ^ z * 0x85157af5d66d76d9L;
-        hash = (hash ^ (hash >>> 30)) * 0xbf58476d1ce4e5b9L;
-        hash = (hash ^ (hash >>> 27)) * 0x94d049bb133111ebL;
-        return ((hash ^ (hash >>> 31)) >>> 11) * 0x1.0p-53;
-    }
-
     private static Vec3 sphere(float r, float latitude, float longitude) {
         float c=(float)Math.cos(latitude);
         return new Vec3(r*c*(float)Math.cos(longitude),r*(float)Math.sin(latitude),r*c*(float)Math.sin(longitude));
@@ -364,12 +245,14 @@ public final class AltitudeVisuals {
         private final boolean depth=GL11.glIsEnabled(GL11.GL_DEPTH_TEST), blend=GL11.glIsEnabled(GL11.GL_BLEND);
         private final boolean cull=GL11.glIsEnabled(GL11.GL_CULL_FACE), mask=GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
         private final net.minecraft.client.renderer.ShaderInstance shader=RenderSystem.getShader();
+        private final int texture = RenderSystem.getShaderTexture(0);
         @Override public void close() {
             if(depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
             if(blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
             if(cull) RenderSystem.enableCull(); else RenderSystem.disableCull();
             RenderSystem.depthMask(mask);
             RenderSystem.setShader(() -> shader);
+            RenderSystem.setShaderTexture(0, texture);
         }
     }
 }

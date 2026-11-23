@@ -107,12 +107,30 @@ return "PASS: duplicate sequence and old session rejected by real reply handler"
 """
         report["replay"] = execute(code)
         print(report["replay"], flush=True)
+        execute((ROOT / "tools/probes/drop_confirmation.java").read_text(encoding="utf-8"))
+        setup(0)
+        began = time.monotonic()
+        samples = []
+        while time.monotonic() - began < 20:
+            state = execute(STATE)
+            samples.append(state)
+            if state["dimension"] == "rocketmod:space" and state["leases"] == 0 and not state["clientArmed"]:
+                dropped = execute("return ((java.util.concurrent.atomic.AtomicInteger) System.getProperties().get(\"rocketmod.test.confirmDropped\")).get();")
+                if int(dropped) < 1:
+                    raise RuntimeError("Confirmation drop injection did not observe any messages")
+                report["confirmationLoss"] = {"result": "PASS", "dropped": int(dropped), "samples": samples}
+                print(f"PASS confirmationLoss: {dropped} messages dropped, server and client recovered", flush=True)
+                break
+            time.sleep(0.25)
+        else:
+            raise RuntimeError(f"Confirmation-loss recovery timed out: {state}")
         report["result"] = "PASS"
     except Exception as error:
         report["result"] = "FAIL"
         report["error"] = str(error)
         raise
     finally:
+        execute((ROOT / "tools/probes/restore_confirmation.java").read_text(encoding="utf-8"))
         execute(RESTORE)
         execute(RESET)
         report["cleanup"] = execute(STATE)

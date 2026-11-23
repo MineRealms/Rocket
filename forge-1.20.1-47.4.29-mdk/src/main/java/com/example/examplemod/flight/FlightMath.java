@@ -21,9 +21,16 @@ public final class FlightMath {
         return (float) (t * t * (3 - 2 * t));
     }
 
+    public static float orbitBlend(double altitude, double threshold) {
+        return smoothRange(altitude, threshold + 1024, threshold + 1872);
+    }
+
     public static FlightPhase phase(double altitude, double verticalSpeed, boolean inSpace,
                                     boolean flying, double threshold) {
-        if (inSpace) return verticalSpeed < -0.05 && altitude < threshold + 96 ? FlightPhase.REENTRY : FlightPhase.SPACE;
+        if (inSpace) {
+            if (verticalSpeed < -0.05 && altitude < threshold + 96) return FlightPhase.REENTRY;
+            return altitude >= threshold + 1872 ? FlightPhase.SYNCHRONOUS_ORBIT : FlightPhase.NEAR_ORBIT;
+        }
         if (!flying) return FlightPhase.GROUND;
         if (Math.abs(altitude - threshold) < 32) return FlightPhase.TRANSITION;
         if (verticalSpeed < -0.05) return FlightPhase.DESCENT;

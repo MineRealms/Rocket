@@ -32,7 +32,7 @@ def main():
     output = ROOT / ".local-cache/validation/p1-visual-frames.json"
     frames = []
     try:
-        for altitude in [80, 180, 320, 450, 511, 513, 900, 1500, 2000]:
+        for altitude in [80, 180, 320, 450, 511, 513, 900, 1500, 2000, 2384, 4000]:
             execute(VIEW.replace("@H@", str(altitude)).replace("@PITCH@", "90" if altitude >= 900 else "60"))
             time.sleep(2)
             metadata = execute((ROOT / "tools/probes/client_state.java").read_text(encoding="utf-8"))
@@ -42,6 +42,8 @@ def main():
             print(f"CAPTURE H={altitude}: {metadata}", flush=True)
     finally:
         execute("net.minecraft.client.Minecraft.getInstance().execute(() -> net.minecraft.client.Minecraft.getInstance().options.hideGui=false); return \"HUD restored\";")
+        execute(BASE + "p.setNoGravity(false); p.stopFallFlying(); "
+                "p.getAbilities().flying=true; p.onUpdateAbilities(); return \"visual fixture restored gravity\";")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(frames, indent=2), encoding="utf-8")
 

@@ -139,7 +139,11 @@ public final class ClientFlightState {
                 if (preparation != null && preparation.id().equals(message.id())) clearPreparation();
                 readiness = "aborted: " + message.detail();
             }
-            case SNAPSHOT -> serverStatus = message.detail();
+            case SNAPSHOT -> {
+                serverStatus = message.detail();
+                if (message.id().equals(FlightNetwork.NONE) && preparation != null
+                        && message.sequence() >= latestPreparationSequence) clearPreparation();
+            }
         }
     }
 
@@ -154,7 +158,8 @@ public final class ClientFlightState {
         if (event.phase == TickEvent.Phase.START) {
             Player player = Minecraft.getInstance().player;
             if (player != null && heldPosition != null) {
-                if (preparation == null || !player.level().dimension().equals(preparation.source()) || !player.isFallFlying()) {
+                if (preparation == null || !player.level().dimension().equals(preparation.source())
+                        || !player.isFallFlying() && preparation.source().equals(Level.OVERWORLD)) {
                     releaseHold(false);
                 } else {
                     player.setPos(heldPosition.x, heldPosition.y, heldPosition.z);
@@ -167,7 +172,8 @@ public final class ClientFlightState {
         Player player = Minecraft.getInstance().player;
         if (!enabled() || player == null || preparation == null) return;
         if (player.level().dimension().equals(preparation.target())) return;
-        if (!player.level().dimension().equals(preparation.source()) || !player.isFallFlying()) return;
+        if (!player.level().dimension().equals(preparation.source())
+                || !player.isFallFlying() && preparation.source().equals(Level.OVERWORLD)) return;
         if (!canCross(player, preparation.target())) {
             boolean upward = preparation.source().equals(Level.OVERWORLD);
             double distance = upward ? threshold - player.getEyeY() : player.getEyeY() - FlightMath.SPACE_ENTRY_HEIGHT;

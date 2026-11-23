@@ -128,6 +128,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--stage-mods", action="store_true")
+    parser.add_argument("--validation-bridge", action="store_true", help="Enable a loopback Rosetta client probe on port 48792")
     parser.add_argument("--java", type=Path, default=Path(r"C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin\java.exe"))
     parser.add_argument("--proxy", help="Optional HTTP proxy, e.g. http://127.0.0.1:7890")
     mode = parser.add_mutually_exclusive_group()
@@ -206,6 +207,11 @@ def main():
         for future in futures:
             future.result()
     staged = stage_mods(game) if args.stage_mods else {}
+    if args.validation_bridge:
+        bootstrap = game / "RosettaRemoteDebugBridge/client/RocketValidationBridge.java"
+        bootstrap.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "tools/probes/RocketValidationBridge.java", bootstrap)
+        args.jvm_arg.extend(["-Drocket.validation.bridge=true", "-Drosetta.remote.port=48792"])
     username = "RocketTest"
     offline_uuid = uuid.UUID(bytes=hashlib.md5(f"OfflinePlayer:{username}".encode()).digest(), version=3)
     variables = {"auth_player_name": username, "version_name": PROFILE,

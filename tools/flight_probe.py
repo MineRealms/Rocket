@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import socket
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = ROOT / "forge-1.20.1-47.4.29-mdk/run/RosettaRemoteDebugBridge/remote-token.txt"
@@ -39,6 +40,7 @@ def call(command, args, port, token_file=TOKEN):
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["ping", "state", "console", "exec"])
     parser.add_argument("value", nargs="?")
