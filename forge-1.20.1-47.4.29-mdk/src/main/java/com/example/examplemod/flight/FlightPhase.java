@@ -1,0 +1,5 @@
+package com.example.examplemod.flight;
+
+public enum FlightPhase {
+    GROUND, LIFTOFF, LOWER_ATMOSPHERE, UPPER_ATMOSPHERE, TRANSITION, SPACE, REENTRY, DESCENT
+}

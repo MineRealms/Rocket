@@ -12,7 +12,9 @@ java.util.List<String> states = new java.util.ArrayList<>();
 for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
     states.add(p.getGameProfile().getName() + " dimension=" + p.level().dimension().location()
         + " position=" + p.position() + " velocity=" + p.getDeltaMovement()
-        + " gliding=" + p.isFallFlying() + " yaw=" + p.getYRot() + " pitch=" + p.getXRot());
+        + " gliding=" + p.isFallFlying() + " yaw=" + p.getYRot() + " pitch=" + p.getXRot()
+        + " altitude=" + com.example.examplemod.transition.FlightTransferCoordinator.altitude(p)
+        + " transfer=" + com.example.examplemod.transition.FlightTransferCoordinator.status(p));
 }
 return "debug=" + com.example.examplemod.Config.debugElytraSpaceFlight
     + " portals=" + com.example.examplemod.compat.immptl.ImmersivePortalsBackend.getOwnedPortalCount(server)
@@ -21,13 +23,17 @@ return "debug=" + com.example.examplemod.Config.debugElytraSpaceFlight
 """
 
 
-def call(command, args, port):
-    request = {"token": TOKEN.read_text(encoding="utf-8").strip(), "cmd": command, "args": args}
+def request(command, args, port=48790, token_file=TOKEN):
+    payload = {"token": Path(token_file).read_text(encoding="utf-8").strip(), "cmd": command, "args": args}
     with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
         connection.settimeout(65)
-        connection.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        connection.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         with connection.makefile("rb") as stream:
-            response = json.loads(stream.readline(64 * 1024 * 1024))
+            return json.loads(stream.readline(64 * 1024 * 1024))
+
+
+def call(command, args, port, token_file=TOKEN):
+    response = request(command, args, port, token_file)
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0 if response.get("ok") else 1
 
@@ -37,6 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("command", choices=["ping", "state", "console", "exec"])
     parser.add_argument("value", nargs="?")
     parser.add_argument("--port", type=int, default=48790)
+    parser.add_argument("--token-file", type=Path, default=TOKEN)
     arguments = parser.parse_args()
     command = arguments.command
     payload = {}
@@ -50,4 +57,4 @@ if __name__ == "__main__":
         if not arguments.value:
             parser.error("exec requires a Java method-body file")
         payload = {"code": Path(arguments.value).read_text(encoding="utf-8")}
-    raise SystemExit(call(command, payload, arguments.port))
+    raise SystemExit(call(command, payload, arguments.port, arguments.token_file))

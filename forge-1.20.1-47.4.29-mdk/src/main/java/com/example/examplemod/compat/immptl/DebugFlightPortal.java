@@ -1,6 +1,9 @@
 package com.example.examplemod.compat.immptl;
 
 import com.example.examplemod.Config;
+import com.example.examplemod.network.FlightNetwork;
+import com.example.examplemod.transition.FlightTransferCoordinator;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
@@ -22,6 +25,8 @@ public final class DebugFlightPortal extends Portal {
                 && !player.isSpectator()
                 && player.isFallFlying()
                 && !player.isPassenger()
+                && (level().isClientSide ? FlightNetwork.clientCanCross(player, dimensionTo)
+                    : player instanceof ServerPlayer serverPlayer && FlightTransferCoordinator.canCross(serverPlayer, dimensionTo))
                 && super.canTeleportEntity(entity);
     }
 }

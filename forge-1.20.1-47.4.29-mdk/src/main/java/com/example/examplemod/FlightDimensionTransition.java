@@ -47,10 +47,12 @@ public final class FlightDimensionTransition {
                             ServerPlayer player = context.getSource().getPlayerOrException();
                             ImmersivePortalsBackend.reconcile(player.getServer());
                             context.getSource().sendSuccess(() -> Component.literal(String.format(
-                                    "debugElytraSpaceFlight=%s; boundary=%.1f <-> 64; dimension=%s; Y=%.2f; gliding=%s; portals=%d",
+                                    "debugElytraSpaceFlight=%s; boundary=%.1f <-> 64; dimension=%s; Y=%.2f; gliding=%s; portals=%d; H=%.2f; %s",
                                     Config.debugElytraSpaceFlight, Config.flightTransitionAltitude,
                                     player.level().dimension().location(), player.getY(), player.isFallFlying(),
-                                    ImmersivePortalsBackend.getOwnedPortalCount(player.getServer()))), false);
+                                    ImmersivePortalsBackend.getOwnedPortalCount(player.getServer()),
+                                    com.example.examplemod.transition.FlightTransferCoordinator.altitude(player),
+                                    com.example.examplemod.transition.FlightTransferCoordinator.status(player))), false);
                             return 1;
                         }))
                         .then(Commands.literal("kit").executes(context -> giveKit(context.getSource().getPlayerOrException())))

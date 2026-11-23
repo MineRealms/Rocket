@@ -2,6 +2,7 @@ package com.example.examplemod.compat.immptl;
 
 import com.example.examplemod.Config;
 import com.example.examplemod.ExampleMod;
+import com.example.examplemod.transition.FlightTransferCoordinator;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -9,7 +10,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
@@ -20,16 +20,9 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.slf4j.Logger;
 import qouteall.imm_ptl.core.api.PortalAPI;
-import qouteall.imm_ptl.core.chunk_loading.ChunkLoader;
-import qouteall.imm_ptl.core.chunk_loading.DimensionalChunkPos;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.portal.global_portals.GlobalPortalStorage;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ImmersivePortalsBackend {
@@ -39,9 +32,6 @@ public final class ImmersivePortalsBackend {
     public static final double SPACE_ENTRY_HEIGHT = 64.0;
     private static final String PORTAL_TAG = "rocketmod:debug_elytra_boundary";
     private static final double PORTAL_SIZE = 60_000_000.0;
-    private static final double PRELOAD_DISTANCE = 128.0;
-    private static final int PRELOAD_RADIUS = 2;
-    private static final Map<UUID, ChunkLease> CHUNK_LEASES = new HashMap<>();
     private static double installedAltitude = Double.NaN;
     private static boolean installedEnabled;
 
@@ -50,7 +40,7 @@ public final class ImmersivePortalsBackend {
 
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
-        CHUNK_LEASES.clear();
+        FlightTransferCoordinator.reset("server started");
         removeOwnedPortals(event.getServer());
         installedAltitude = Double.NaN;
         reconcile(event.getServer());
@@ -66,8 +56,8 @@ public final class ImmersivePortalsBackend {
                 || Double.compare(installedAltitude, Config.flightTransitionAltitude) != 0;
         if (configChanged || server.getTickCount() % 20 == 0) {
             reconcile(server);
-            updateChunkLeases(server);
         }
+        FlightTransferCoordinator.tick(server);
     }
 
     public static void reconcile(MinecraftServer server) {
@@ -80,7 +70,8 @@ public final class ImmersivePortalsBackend {
         }
 
         removeOwnedPortals(server);
-        releaseAllChunkLeases();
+        FlightTransferCoordinator.reset("flight boundaries changed");
+        FlightTransferCoordinator.configure(server, enabled, altitude);
         installedEnabled = enabled;
         installedAltitude = altitude;
         if (!enabled) {
@@ -144,57 +135,18 @@ public final class ImmersivePortalsBackend {
         }
     }
 
-    private static void updateChunkLeases(MinecraftServer server) {
-        Set<UUID> active = new HashSet<>();
-        if (Config.debugElytraSpaceFlight && getOwnedPortalCount(server) == 2) {
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                ResourceKey<Level> target = preloadTarget(player);
-                if (target == null) {
-                    continue;
-                }
-                UUID playerId = player.getUUID();
-                active.add(playerId);
-                ChunkPos chunk = player.chunkPosition();
-                DimensionalChunkPos center = new DimensionalChunkPos(target, chunk);
-                ChunkLease old = CHUNK_LEASES.get(playerId);
-                if (old != null && old.player() == player && old.loader().center.equals(center)) {
-                    continue;
-                }
-                releaseChunkLease(playerId);
-                ChunkLoader loader = new ChunkLoader(center, PRELOAD_RADIUS);
-                PortalAPI.addChunkLoaderForPlayer(player, loader);
-                CHUNK_LEASES.put(playerId, new ChunkLease(player, loader));
-            }
-        }
-        for (UUID playerId : Set.copyOf(CHUNK_LEASES.keySet())) {
-            if (!active.contains(playerId)) {
-                releaseChunkLease(playerId);
-            }
-        }
-    }
-
-    private static ResourceKey<Level> preloadTarget(ServerPlayer player) {
-        if (!player.isAlive() || !player.isFallFlying() || player.isPassenger() || player.isSpectator()) {
-            return null;
-        }
-        if (player.level().dimension().equals(Level.OVERWORLD)
-                && Math.abs(player.getY() - Config.flightTransitionAltitude) <= PRELOAD_DISTANCE) {
-            return SPACE_DIMENSION;
-        }
-        if (player.level().dimension().equals(SPACE_DIMENSION)
-                && Math.abs(player.getY() - SPACE_ENTRY_HEIGHT) <= PRELOAD_DISTANCE) {
-            return Level.OVERWORLD;
-        }
-        return null;
-    }
-
     public static int getChunkLeaseCount() {
-        return CHUNK_LEASES.size();
+        return FlightTransferCoordinator.leaseCount();
     }
 
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        releaseChunkLease(event.getEntity().getUUID());
+        if (event.getEntity() instanceof ServerPlayer player) FlightTransferCoordinator.logout(player);
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) FlightTransferCoordinator.sendConfig(player);
     }
 
     @SubscribeEvent
@@ -204,31 +156,15 @@ public final class ImmersivePortalsBackend {
             LOGGER.info("ROCKET dimension change: player={}, {} -> {}, pos={}, velocity={}, fallFlying={}",
                     player.getGameProfile().getName(), event.getFrom().location(), event.getTo().location(),
                     player.position(), player.getDeltaMovement(), player.isFallFlying());
-            releaseChunkLease(player.getUUID());
         }
     }
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        releaseAllChunkLeases();
+        FlightTransferCoordinator.reset("server stopping");
         removeOwnedPortals(event.getServer());
         installedAltitude = Double.NaN;
         installedEnabled = false;
     }
 
-    private static void releaseChunkLease(UUID playerId) {
-        ChunkLease lease = CHUNK_LEASES.remove(playerId);
-        if (lease != null) {
-            PortalAPI.removeChunkLoaderForPlayer(lease.player(), lease.loader());
-        }
-    }
-
-    private static void releaseAllChunkLeases() {
-        for (UUID playerId : Set.copyOf(CHUNK_LEASES.keySet())) {
-            releaseChunkLease(playerId);
-        }
-    }
-
-    private record ChunkLease(ServerPlayer player, ChunkLoader loader) {
-    }
 }

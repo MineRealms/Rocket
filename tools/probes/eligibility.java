@@ -13,7 +13,7 @@ try {
     player.stopFallFlying();
     if (portal.canTeleportEntity(player)) throw new IllegalStateException("Non-gliding player accepted");
     player.startFallFlying();
-    if (!portal.canTeleportEntity(player)) throw new IllegalStateException("Gliding player rejected");
+    if (portal.canTeleportEntity(player)) throw new IllegalStateException("Unprepared gliding player accepted");
     net.minecraft.world.phys.Vec3 position = new net.minecraft.world.phys.Vec3(125, com.example.examplemod.Config.flightTransitionAltitude + 3, -250);
     net.minecraft.world.phys.Vec3 mapped = portal.transformPoint(position);
     if (mapped.distanceTo(new net.minecraft.world.phys.Vec3(125, 67, -250)) > 0.000001)
@@ -24,7 +24,7 @@ try {
     if (com.example.examplemod.compat.immptl.ImmersivePortalsBackend.getOwnedPortalCount(server) != 0
             || com.example.examplemod.compat.immptl.ImmersivePortalsBackend.getChunkLeaseCount() != 0)
         throw new IllegalStateException("Disable failed to clean portals and leases");
-    return "PASS: idempotent pair, non-gliding denied, gliding allowed, mapping, flag denial, cleanup";
+    return "PASS: idempotent pair, non-gliding denied, unprepared gliding denied, mapping, flag denial, cleanup";
 } finally {
     com.example.examplemod.Config.debugElytraSpaceFlight = originalDebug;
     if (originalGliding) player.startFallFlying(); else player.stopFallFlying();
