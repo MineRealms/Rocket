@@ -12,6 +12,7 @@ import com.example.examplemod.client.flight.ClientFlightState;
 import com.example.examplemod.compat.immptl.ImmersivePortalsBackend;
 import com.example.examplemod.flight.FlightMath;
 import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.DimensionSpecialEffects;
 import net.minecraft.client.renderer.GameRenderer;
@@ -19,6 +20,8 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.material.FogType;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -27,6 +30,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import qouteall.imm_ptl.core.ClientWorldLoader;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
 
 import java.util.Random;
 
@@ -36,6 +40,12 @@ public final class AltitudeVisuals {
     private static final ResourceLocation SPACE_TYPE = new ResourceLocation("rocketmod", "space_type");
 
     private AltitudeVisuals() {}
+
+    private static boolean supportedLevel() {
+        var level = Minecraft.getInstance().level;
+        return level != null && (level.dimension().equals(Level.OVERWORLD)
+                || level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
+    }
 
     @SubscribeEvent
     public static void registerEffects(RegisterDimensionSpecialEffectsEvent event) {
@@ -50,17 +60,17 @@ public final class AltitudeVisuals {
         @SubscribeEvent
         public static void fogColor(ViewportEvent.ComputeFogColor event) {
             Camera camera = event.getCamera();
-            if (camera.getEntity() == null) return;
+            if (camera.getEntity() == null || !supportedLevel() || camera.getFluidInCamera() != FogType.NONE) return;
             float atmo = atmosphere(ClientFlightState.altitude((float) event.getPartialTick()));
-            event.setRed(Mth.lerp(atmo, 0.018f, event.getRed()));
-            event.setGreen(Mth.lerp(atmo, 0.025f, event.getGreen()));
-            event.setBlue(Mth.lerp(atmo, 0.055f, event.getBlue()));
+            event.setRed(Mth.lerp(atmo, event.getRed(), 0.018f));
+            event.setGreen(Mth.lerp(atmo, event.getGreen(), 0.025f));
+            event.setBlue(Mth.lerp(atmo, event.getBlue(), 0.055f));
         }
 
         @SubscribeEvent
         public static void fogDistance(ViewportEvent.RenderFog event) {
             Camera camera = event.getCamera();
-            if (camera.getEntity() == null) return;
+            if (camera.getEntity() == null || !supportedLevel() || event.getType() != FogType.NONE) return;
             float atmo = atmosphere(ClientFlightState.altitude((float) event.getPartialTick()));
             event.scaleFarPlaneDistance(Mth.lerp(atmo, 0.42f, 1.0f));
             event.setNearPlaneDistance(Mth.lerp(atmo, 0.0f, event.getNearPlaneDistance()));
@@ -84,7 +94,11 @@ public final class AltitudeVisuals {
             boolean space = passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION);
             double h = virtualAltitude(camera.getPosition().y, space);
             float alpha = FlightMath.smoothRange(h, 128, 520);
-            if (alpha > 0.005f) drawPlanet(event.getPoseStack(), space, alpha);
+            if (!passDimension.equals(Level.OVERWORLD) && !passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION)) return;
+            try (RenderState ignored = new RenderState()) {
+                drawSky(event.getPoseStack(), atmosphere(h), event.getRenderTick() + event.getPartialTick());
+                if (alpha > 0.005f) drawPlanet(event.getPoseStack(), camera.getPosition(), space, alpha);
+            }
         }
     }
 
@@ -101,8 +115,8 @@ public final class AltitudeVisuals {
                                  Matrix4f projection, boolean foggy, Runnable setupFog) {
             double h = virtualAltitude(camera.getPosition().y,
                     level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
-            drawSky(pose, atmosphere(h), ticks + partialTick);
-            return true;
+            // Keep the native sun, moon and day/night sky. AFTER_SKY adds the fading space layer.
+            return !overworld;
         }
 
         @Override
@@ -110,9 +124,12 @@ public final class AltitudeVisuals {
                                     double camX, double camY, double camZ, Matrix4f projection) {
             double h = virtualAltitude(camY, level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
             float opacity = 1.0f - atmosphere(h);
+            if (overworld && h < 160) return false;
+            try (RenderState ignored = new RenderState()) {
             if (opacity > 0.005f)
                 drawClouds(pose, camX, camY, camZ, level.getCloudColor(partialTick), opacity, ticks + partialTick,
                         level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
+            }
             return true;
         }
 
@@ -138,11 +155,12 @@ public final class AltitudeVisuals {
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
+        RenderSystem.disableCull();
         RenderSystem.depthMask(false);
         BufferBuilder b = Tesselator.getInstance().getBuilder();
         b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
         Matrix4f m = pose.last().pose();
-        float radius = 1500;
+        float radius = 100;
         for (int lat = 0; lat < 12; lat++) for (int lon = 0; lon < 32; lon++) {
             float p0 = (float) (-Math.PI / 2 + Math.PI * lat / 12), p1 = (float) (-Math.PI / 2 + Math.PI * (lat + 1) / 12);
             float t0 = (float) (Math.PI * 2 * lon / 32), t1 = (float) (Math.PI * 2 * (lon + 1) / 32);
@@ -156,11 +174,16 @@ public final class AltitudeVisuals {
             float alpha = Mth.clamp((darkness - 0.12f) / 0.88f, 0, 1);
             for (int i = 0; i < 850; i++) {
                 float lat = (random.nextFloat() - 0.5f) * (float) Math.PI, lon = random.nextFloat() * (float) (Math.PI * 2);
-                Vec3 p = sphere(1200, lat, lon);
-                float size = i % 37 == 0 ? 2.5f : 1, twinkle = 0.72f + 0.28f * (float) Math.sin(time * 0.035f + i * 2.71);
-                float a = alpha * twinkle, w = size / 1200;
-                vertex(b, m, p, w,w,w,a); vertex(b,m,p.add(size,0,0),w,w,w,a); vertex(b,m,p.add(size,size,0),w,w,w,a);
-                vertex(b,m,p,w,w,w,a); vertex(b,m,p.add(size,size,0),w,w,w,a); vertex(b,m,p.add(0,size,0),w,w,w,a);
+                Vec3 p = sphere(90, lat, lon), normal = p.normalize();
+                float size = i % 37 == 0 ? 0.14f : 0.065f;
+                float twinkle = 0.72f + 0.28f * (float) Math.sin(time * 0.035f + i * 2.71);
+                float a = alpha * twinkle;
+                Vec3 right = normal.cross(Math.abs(normal.y) > 0.9 ? new Vec3(1,0,0) : new Vec3(0,1,0)).normalize().scale(size);
+                Vec3 up = right.cross(normal).normalize().scale(size);
+                Vec3 v0=p.subtract(right).subtract(up), v1=p.add(right).subtract(up);
+                Vec3 v2=p.add(right).add(up), v3=p.subtract(right).add(up);
+                vertex(b,m,v0,1,0.97f,0.9f,a); vertex(b,m,v1,1,0.97f,0.9f,a); vertex(b,m,v2,1,0.97f,0.9f,a);
+                vertex(b,m,v0,1,0.97f,0.9f,a); vertex(b,m,v2,1,0.97f,0.9f,a); vertex(b,m,v3,1,0.97f,0.9f,a);
             }
         }
         BufferUploader.drawWithShader(b.end());
@@ -170,7 +193,7 @@ public final class AltitudeVisuals {
     }
 
     private static void skyVertex(BufferBuilder b, Matrix4f m, Vec3 p, float darkness, float blue) {
-        vertex(b, m, p, 0.08f * (1-darkness), 0.30f * (1-darkness), blue, 1);
+        vertex(b, m, p, 0.006f, 0.009f, 0.018f, darkness);
     }
 
     private static void drawClouds(PoseStack pose, double x, double y, double z, Vec3 color, float alpha, float time, boolean space) {
@@ -180,14 +203,14 @@ public final class AltitudeVisuals {
         b.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
         Matrix4f m = pose.last().pose();
         double offset = space ? (ClientFlightState.hasServerConfig() ? ClientFlightState.transitionAltitude() : 512.0) - 64.0 : 0.0;
-        float cy = (float) (128.0 - offset), shift = (time * 0.025f) % 128, span = 768;
+        float cy = (float) (128.0 - offset-y), shift = (time * 0.025f) % 128, span = 768;
         int grid = 12;
         for (int ix=-grid/2; ix<grid/2; ix++) for (int iz=-grid/2; iz<grid/2; iz++) {
             long seed = (long)(Math.floor(x/128)+ix)*341873128712L ^ (long)(Math.floor(z/128)+iz)*132897987541L;
             Random random = new Random(seed);
             if (random.nextFloat()<0.34f) continue;
-            float x0=(float)Math.floor(x/128)*128+ix*span/grid-shift;
-            float z0=(float)Math.floor(z/128)*128+iz*span/grid;
+            float x0=(float)(Math.floor(x/128)*128-x)+ix*span/grid-shift;
+            float z0=(float)(Math.floor(z/128)*128-z)+iz*span/grid;
             float w=span/grid*(0.45f+random.nextFloat()*0.55f), d=span/grid*(0.45f+random.nextFloat()*0.55f);
             float a=alpha*(0.22f+random.nextFloat()*0.18f), r=(float)color.x, g=(float)color.y, bl=(float)color.z;
             vertex(b,m,new Vec3(x0,cy,z0),r,g,bl,a); vertex(b,m,new Vec3(x0,cy,z0+d),r,g,bl,a);
@@ -197,7 +220,7 @@ public final class AltitudeVisuals {
         RenderSystem.enableCull(); RenderSystem.disableBlend();
     }
 
-    private static void drawPlanet(PoseStack pose, boolean space, float alpha) {
+    private static void drawPlanet(PoseStack pose, Vec3 camera, boolean space, float alpha) {
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
@@ -208,8 +231,11 @@ public final class AltitudeVisuals {
         b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
         Matrix4f m = pose.last().pose();
         double offset = space ? (ClientFlightState.hasServerConfig() ? ClientFlightState.transitionAltitude() : 512.0) - 64.0 : 0.0;
-        double centerY = -4096.0 - offset;
-        int latitudes = 40, longitudes = 80;
+        double centerY = -2048.0-offset;
+        pose.pushPose();
+        pose.translate(-camera.x,-camera.y,-camera.z);
+        m=pose.last().pose();
+        int latitudes = 64, longitudes = 128;
         for (int lat = 0; lat < latitudes; lat++) for (int lon = 0; lon < longitudes; lon++) {
             float p0=(float)(-Math.PI/2+Math.PI*lat/latitudes), p1=(float)(-Math.PI/2+Math.PI*(lat+1)/latitudes);
             float t0=(float)(Math.PI*2*lon/longitudes), t1=(float)(Math.PI*2*(lon+1)/longitudes);
@@ -219,6 +245,7 @@ public final class AltitudeVisuals {
             planetVertex(b,m,a,p0,t0,alpha); planetVertex(b,m,d,p1,t1,alpha); planetVertex(b,m,e,p0,t1,alpha);
         }
         BufferUploader.drawWithShader(b.end());
+        pose.popPose();
         RenderSystem.depthMask(true);
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
@@ -247,5 +274,18 @@ public final class AltitudeVisuals {
 
     private static void vertex(BufferBuilder b, Matrix4f matrix, Vec3 p, float r, float g, float blue, float a) {
         b.vertex(matrix,(float)p.x,(float)p.y,(float)p.z).color(r,g,blue,a).endVertex();
+    }
+
+    private static final class RenderState implements AutoCloseable {
+        private final boolean depth=GL11.glIsEnabled(GL11.GL_DEPTH_TEST), blend=GL11.glIsEnabled(GL11.GL_BLEND);
+        private final boolean cull=GL11.glIsEnabled(GL11.GL_CULL_FACE), mask=GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
+        private final net.minecraft.client.renderer.ShaderInstance shader=RenderSystem.getShader();
+        @Override public void close() {
+            if(depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
+            if(blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
+            if(cull) RenderSystem.enableCull(); else RenderSystem.disableCull();
+            RenderSystem.depthMask(mask);
+            RenderSystem.setShader(() -> shader);
+        }
     }
 }
