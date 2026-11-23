@@ -1,0 +1,15 @@
+net.minecraft.server.MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+net.minecraft.server.level.ServerPlayer p = server.getPlayerList().getPlayers().get(0);
+if (!p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) return "Expected Overworld";
+if (!p.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST).is(net.minecraft.world.item.Items.ELYTRA)) return "Equip Elytra first";
+p.teleportTo(server.overworld(), p.getX(), 490, p.getZ(), 0, -85);
+p.getAbilities().flying = false;
+p.onUpdateAbilities();
+p.setOnGround(false);
+p.startFallFlying();
+p.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, 1.5, 0.1));
+p.hurtMarked = true;
+net.minecraft.world.item.ItemStack firework = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.FIREWORK_ROCKET);
+firework.getOrCreateTagElement("Fireworks").putByte("Flight", (byte) 3);
+p.serverLevel().addFreshEntity(new net.minecraft.world.entity.projectile.FireworkRocketEntity(p.level(), firework, p));
+return "Ascent armed at Y490; natural Elytra/firework movement must cross the portal";

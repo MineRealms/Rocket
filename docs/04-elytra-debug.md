@@ -12,7 +12,7 @@ debugElytraSpaceFlight = true
 flightTransitionAltitude = 512.0
 ```
 
-调试开关默认开启。关闭后移除两侧临时门户，普通飞行不再进入太空；火箭入口待后续实现，不会把任意坐骑视作火箭。Forge 配置重载后服务端自动协调，最迟约 1 秒更新；服务端每次跨界也检查开关。
+调试开关默认开启。关闭后移除两侧临时门户，普通飞行不再进入太空；火箭入口待后续实现，不会把任意坐骑视作火箭。修改文件后重启客户端/服务器生效。代码也处理 Forge 配置重载事件，但本环境文件修改未自动触发重载，因此不能依赖热更新。
 
 边界为主世界 Y=512 与太空 Y=64，x/z、方向、尺度保持一致。IP 以眼睛/相机跨平面检测，所以 F3 脚部高度和触发点有眼高差。只有存活、非旁观、未骑乘、正在鞘翅滑翔的玩家可穿越。只穿戴鞘翅、创造悬空或普通掉落均不满足资格。
 
@@ -55,3 +55,36 @@ python tools/flight_probe.py exec tools/probes/eligibility.java
 ```
 
 桥仅作为可选本机开发依赖，不打包到 ROCKET jar。运行证据与尚未验证项目在本文末尾记录。
+
+## 本机环境处理
+
+首次构建补齐了 ForgeGradle 7 的工具缓存。Temurin 8 自动下载收到无效文件，改用 Azul 官方 JDK 8 并核对 SHA-256；游戏仍使用现有 Temurin 17.0.18。该 JDK 8 仅用于旧版映射工具。
+
+原先写死的 Java 路径不存在、代理 15236 未监听。本次通过已运行的本机代理 7890 下载；该端口只注入本次进程环境，不写入项目默认配置。
+
+C 盘空间不足时，将资源和本次 Forge 工具缓存迁至项目 `.local-cache/`，原路径通过 Windows junction 指向新位置：
+
+- `%APPDATA%/.minecraft/assets` -> `ROCKET/.local-cache/minecraft-assets`
+- `%USERPROFILE%/.gradle/caches/minecraftforge/forgegradle/mavenizer/caches` -> `ROCKET/.local-cache/forge-tool-cache`
+
+该目录已被 Git 忽略，仍用于本机后续构建和启动。不要把它当成可随意移除的单次测试输出；移动工程时需要同步调整 junction。
+
+`run-client.bat` 禁用 Gradle configuration cache，确保 IP refmap 路径在首次工具缓存建立后重新解析。
+
+## 运行证据
+
+2026-11-23，Forge 47.4.29 + IP 3.0.7 + Cloth 11.1.136 + 可选 Rosetta，Java 17.0.18：
+
+- `build` / `renameJar` 成功。没有 JUnit 用例；本轮通过游戏内探针验收行为。
+- 默认 `build-mod.bat --offline`（不传 Rosetta 参数、不注入代理）也成功；Java 编译目标仍为 17。发行 jar 的 SHA-256 为 `f3d2e5ba91e12e758a5543b1f239d46268e8fa6791691cd703a395ad4328ac93`。
+- 集成服务器实际进入 `ROCKET-Flight-Test`，客户端创建 `rocketmod:space`，同步两个自定义全局门户。
+- `tools/probes/eligibility.java` 返回 PASS：重复协调维持两个门户、非滑翔拒绝、滑翔允许、单位平移映射正确、运行开关关闭立即拒绝且协调后清理门户/租约。
+- 修改真实 TOML 为 false 并重启客户端，Rosetta 返回 `debug=false portals=0 leases=0`，确认文件开关实际生效；交付时恢复 true。
+- `tools/probes/ascent.java` 在主世界 Y490 设置滑翔初始状态并生成普通附着烟花，随后由实际运动自然跨界，没有调用跨维度 API。
+- 21:04:11，IP 客户端自然跨越后服务端确认主世界 -> 太空，`fallFlying=true`，速度 `(0, 1.50897, 0.13523)`。
+- 21:04:16，失去推进后下降自然返回主世界，`fallFlying=true`，速度 `(0, -2.16253, 0.02840)`。
+- Rosetta 内置游戏截图成功生成，确认客户端实际渲染非空画面。尚未做跨界逐帧录像、20 次往返压力测试、独立专用服务器或冷区块 Ready 验收，不宣称 G0-G4 全部通过。
+
+太空入场脚部 Y 可暂时小于 64：IP 的相机/眼睛跨平面时点与脚部位置不同。验证以维度、连续运动和眼睛跨越为准。
+
+交付时客户端保持打开，`Dev` 在主世界测试存档内，运行状态为 `debug=true portals=2 leases=0`。鞘翅已装备，手持 64 个三级烟花。回到游戏后执行 `/rocketmod flight launch`，继续使用烟花爬升即可亲自验证。

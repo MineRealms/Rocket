@@ -5,3 +5,5 @@
 **/.idea/
 **/RosettaRemoteDebugBridge/
 *.log
+/.local-cache/
+**/__pycache__/
