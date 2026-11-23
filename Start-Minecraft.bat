@@ -18,9 +18,8 @@ if errorlevel 1 (
 )
 
 echo Starting Minecraft 1.20.1 - Rocket...
-echo Keep the local proxy at 127.0.0.1:15236 running for dependency downloads.
 echo The game window will open after Gradle finishes preparing it.
-call "%ROCKET_DIR%\run-client.bat"
+call "%ROCKET_DIR%\run-client.bat" %*
 set "ROCKET_EXIT_CODE=%ERRORLEVEL%"
 popd
 

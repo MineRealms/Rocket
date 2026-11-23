@@ -58,6 +58,9 @@ minecraft {
 
         register('client') {
             systemProperty 'forge.enabledGameTestNamespaces', mod_id
+            if (providers.gradleProperty('quickPlay').isPresent()) {
+                args '--quickPlaySingleplayer', providers.gradleProperty('quickPlay').get()
+            }
         }
 
         register('server') {
@@ -78,6 +81,9 @@ minecraft {
 }
 
 repositories {
+    if (providers.gradleProperty('rosettaBridgeDir').isPresent()) {
+        flatDir { dirs providers.gradleProperty('rosettaBridgeDir').get() }
+    }
     minecraft.mavenizer(it)
     maven fg.forgeMaven
     maven fg.minecraftLibsMaven
@@ -90,6 +96,9 @@ repositories {
 }
 
 dependencies {
+    if (providers.gradleProperty('rosettaBridgeDir').isPresent()) {
+        runtimeOnly renamer.dependency('local:rosetta_remote_debug_bridge:1.0.0')
+    }
     // Minecraft/Forge itself
     implementation minecraft.dependency("net.minecraftforge:forge:$minecraft_version-$forge_version")
     // A 3rd party mod, which needs to be deobfuscated from SRG names to the mappings we're using

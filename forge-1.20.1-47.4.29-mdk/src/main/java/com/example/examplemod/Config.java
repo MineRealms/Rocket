@@ -8,7 +8,6 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -29,8 +28,13 @@ public class Config
             .defineInRange("magicNumber", 42, 0, Integer.MAX_VALUE);
 
     private static final ForgeConfigSpec.DoubleValue FLIGHT_TRANSITION_ALTITUDE = BUILDER
-            .comment("Player Y coordinate for automatic Overworld-to-space travel; also used by the virtual rocket altitude API")
-            .defineInRange("flightTransitionAltitude", 512.0, 1.0, 1_000_000.0);
+            .comment("Overworld portal plane for debug Elytra flight to space Y=64.")
+            .defineInRange("flightTransitionAltitude", 512.0, 384.0, 2048.0);
+
+    private static final ForgeConfigSpec.BooleanValue DEBUG_ELYTRA_SPACE_FLIGHT = BUILDER
+            .comment("Development only: allow unmounted Elytra gliding through the Overworld/space boundary.",
+                    "False removes the debug connection. Production flight requires a future registered rocket vehicle.")
+            .define("debugElytraSpaceFlight", true);
 
     public static final ForgeConfigSpec.ConfigValue<String> MAGIC_NUMBER_INTRODUCTION = BUILDER
             .comment("What you want the introduction message to be for the magic number")
@@ -45,7 +49,8 @@ public class Config
 
     public static boolean logDirtBlock;
     public static int magicNumber;
-    public static double flightTransitionAltitude = 512.0;
+    public static volatile double flightTransitionAltitude = 512.0;
+    public static volatile boolean debugElytraSpaceFlight = true;
     public static String magicNumberIntroduction;
     public static Set<Item> items;
 
@@ -57,9 +62,11 @@ public class Config
     @SubscribeEvent
     static void onLoad(final ModConfigEvent event)
     {
+        if (event.getConfig().getSpec() != SPEC || event instanceof ModConfigEvent.Unloading) return;
         logDirtBlock = LOG_DIRT_BLOCK.get();
         magicNumber = MAGIC_NUMBER.get();
         flightTransitionAltitude = FLIGHT_TRANSITION_ALTITUDE.get();
+        debugElytraSpaceFlight = DEBUG_ELYTRA_SPACE_FLIGHT.get();
         magicNumberIntroduction = MAGIC_NUMBER_INTRODUCTION.get();
 
         // convert the list of strings into a set of items

@@ -1,5 +1,7 @@
 package com.example.examplemod;
 
+import com.example.examplemod.compat.immptl.DebugFlightPortalRegistry;
+
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
@@ -63,6 +65,7 @@ public class ExampleMod
     public ExampleMod(FMLJavaModLoadingContext context)
     {
         IEventBus modEventBus = context.getModEventBus();
+        DebugFlightPortalRegistry.register(modEventBus);
 
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
