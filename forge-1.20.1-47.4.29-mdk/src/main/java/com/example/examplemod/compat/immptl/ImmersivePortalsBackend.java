@@ -18,6 +18,7 @@ import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
+import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -38,6 +39,7 @@ public final class ImmersivePortalsBackend {
     private static final double PORTAL_SIZE = 60_000_000.0;
     private static double installedAltitude = Double.NaN;
     private static boolean installedEnabled;
+    private static final java.util.Set<java.util.UUID> RETURN_LANDINGS = new java.util.HashSet<>();
 
     private ImmersivePortalsBackend() {
     }
@@ -45,6 +47,7 @@ public final class ImmersivePortalsBackend {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         FlightTransferCoordinator.reset("server started");
+        RETURN_LANDINGS.clear();
         removeOwnedPortals(event.getServer());
         installedAltitude = Double.NaN;
         reconcile(event.getServer());
@@ -56,6 +59,11 @@ public final class ImmersivePortalsBackend {
             return;
         }
         MinecraftServer server = event.getServer();
+        RETURN_LANDINGS.removeIf(id -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            return player == null || !player.isAlive() || !player.level().dimension().equals(Level.OVERWORLD)
+                    || player.onGround();
+        });
         recoverLowSpacePlayers(server);
         boolean configChanged = installedEnabled != Config.debugElytraSpaceFlight
                 || Double.compare(installedAltitude, Config.flightTransitionAltitude) != 0;
@@ -88,6 +96,15 @@ public final class ImmersivePortalsBackend {
     public static void preventSpaceVoidDamage(LivingAttackEvent event) {
         if (event.getEntity() instanceof ServerPlayer player && player.level().dimension().equals(SPACE_DIMENSION)
                 && event.getSource().is(DamageTypes.FELL_OUT_OF_WORLD)) event.setCanceled(true);
+    }
+
+    @SubscribeEvent
+    public static void protectReturnLanding(LivingFallEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player && player.level().dimension().equals(Level.OVERWORLD)
+                && RETURN_LANDINGS.remove(player.getUUID())) {
+            event.setDistance(0);
+            event.setDamageMultiplier(0);
+        }
     }
 
     public static void reconcile(MinecraftServer server) {
@@ -171,7 +188,10 @@ public final class ImmersivePortalsBackend {
 
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) FlightTransferCoordinator.logout(player);
+        if (event.getEntity() instanceof ServerPlayer player) {
+            FlightTransferCoordinator.logout(player);
+            RETURN_LANDINGS.remove(player.getUUID());
+        }
     }
 
     @SubscribeEvent
@@ -184,6 +204,9 @@ public final class ImmersivePortalsBackend {
         if (event.getEntity() instanceof ServerPlayer player
                 && (event.getFrom().equals(SPACE_DIMENSION) || event.getTo().equals(SPACE_DIMENSION))) {
             player.fallDistance = 0;
+            if (event.getFrom().equals(SPACE_DIMENSION) && event.getTo().equals(Level.OVERWORLD) && !player.isFallFlying()) {
+                RETURN_LANDINGS.add(player.getUUID());
+            }
             LOGGER.info("ROCKET dimension change: player={}, {} -> {}, pos={}, velocity={}, fallFlying={}",
                     player.getGameProfile().getName(), event.getFrom().location(), event.getTo().location(),
                     player.position(), player.getDeltaMovement(), player.isFallFlying());
@@ -193,6 +216,7 @@ public final class ImmersivePortalsBackend {
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         FlightTransferCoordinator.reset("server stopping");
+        RETURN_LANDINGS.clear();
         removeOwnedPortals(event.getServer());
         installedAltitude = Double.NaN;
         installedEnabled = false;

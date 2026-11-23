@@ -80,15 +80,29 @@ public final class OrbitalTerrainRenderer {
             cube(pose.last().pose(), alpha);
         }
         if (orbit < 0.999f) {
+            flatGround(pose.last().pose(), alpha * (1 - orbit));
+            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
             RenderSystem.setShaderTexture(0, TERRAIN);
             BufferBuilder buffer = Tesselator.getInstance().getBuilder();
             buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-            double half = HALF_WORLD;
+            double half = MAP_SIZE * CELL_SIZE / 2.0;
             quad(buffer, pose.last().pose(), new double[][]{{-half, 0, -half}, {-half, 0, half},
                     {half, 0, half}, {half, 0, -half}}, 1, alpha * (1 - orbit), false);
             BufferUploader.drawWithShader(buffer.end());
         }
         pose.popPose();
+    }
+
+    private static void flatGround(Matrix4f matrix, float alpha) {
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        double w = HALF_WORLD;
+        for (double[] point : new double[][]{{-w, -1, -w}, {-w, -1, w}, {w, -1, w}, {w, -1, -w}}) {
+            buffer.vertex(matrix, (float) point[0], (float) point[1], (float) point[2])
+                    .color(84 / 255f, 114 / 255f, 71 / 255f, alpha).endVertex();
+        }
+        BufferUploader.drawWithShader(buffer.end());
     }
 
     private static void cube(Matrix4f matrix, float alpha) {
@@ -134,7 +148,7 @@ public final class OrbitalTerrainRenderer {
         knownSamples = 0;
         Arrays.fill(known, false);
         NativeImage image = terrain.getPixels();
-        for (int px = 0; px < MAP_SIZE; px++) for (int pz = 0; pz < MAP_SIZE; pz++) image.setPixelRGBA(px, pz, 0xff334b58);
+        for (int px = 0; px < MAP_SIZE; px++) for (int pz = 0; pz < MAP_SIZE; pz++) image.setPixelRGBA(px, pz, 0xff477254);
         terrain.upload();
     }
 

@@ -9,6 +9,7 @@ com.google.gson.JsonObject j = new com.google.gson.JsonObject();
 j.addProperty("dimension", p.level().dimension().location().toString());
 j.addProperty("y", p.getY()); j.addProperty("health", p.getHealth()); j.addProperty("alive", p.isAlive());
 j.addProperty("gliding", p.isFallFlying());
+j.addProperty("onGround", p.onGround());
 j.addProperty("leases", com.example.examplemod.transition.FlightTransferCoordinator.leaseCount());
 j.addProperty("status", com.example.examplemod.transition.FlightTransferCoordinator.status(p));
 return j.toString();
@@ -29,10 +30,17 @@ return "return fixture without Elytra, no command return";
 
 def main():
     report = {}
+    original_altitude = execute(BASE + "return Double.toString(com.example.examplemod.Config.flightTransitionAltitude);")
     try:
-        for name, y, enabled in [("ordinaryFall", 120, True), ("missedPortal", 32, True),
-                                 ("debugDisabled", 32, False), ("voidDamage", -80, False)]:
+        execute("net.minecraft.client.Minecraft c = net.minecraft.client.Minecraft.getInstance(); "
+                "c.execute(() -> { c.options.pauseOnLostFocus=false; c.setScreen(null); }); return \"unpaused test world\";")
+        for name, y, enabled, altitude in [("ordinaryFall", 120, True, 512),
+                                          ("highBoundaryFall", 120, True, 2048),
+                                          ("missedPortal", 32, True, 512),
+                                          ("debugDisabled", 32, False, 512),
+                                          ("voidDamage", -80, False, 512)]:
             execute(BASE + f"com.example.examplemod.Config.debugElytraSpaceFlight = {str(enabled).lower()}; "
+                    f"com.example.examplemod.Config.flightTransitionAltitude = {altitude}; "
                     "com.example.examplemod.compat.immptl.ImmersivePortalsBackend.reconcile(s); return \"config fixture\";")
             extra = ""
             if name == "voidDamage":
@@ -40,12 +48,15 @@ def main():
             execute(SETUP.replace("@Y@", str(y)).replace("@EXTRA@", extra))
             samples = []
             began = time.monotonic()
-            while time.monotonic() - began < 15:
+            while time.monotonic() - began < 45:
                 state = execute(STATE)
                 samples.append(state)
                 if not state["alive"] or state["health"] < 20:
                     raise RuntimeError(f"Space return damaged or killed player: {name}: {state}")
                 if state["dimension"] == "minecraft:overworld":
+                    if name in ("ordinaryFall", "highBoundaryFall") and not state["onGround"]:
+                        time.sleep(0.25)
+                        continue
                     report[name] = {"result": "PASS", "samples": samples}
                     print(f"PASS {name}: alive, health={state['health']}, Overworld Y={state['y']:.2f}", flush=True)
                     execute(BASE + "p.setGameMode(net.minecraft.world.level.GameType.CREATIVE); "
@@ -60,7 +71,7 @@ def main():
         report["error"] = str(error)
         raise
     finally:
-        execute(BASE + """
+        execute(BASE + f"com.example.examplemod.Config.flightTransitionAltitude = {original_altitude};" + """
 com.example.examplemod.Config.debugElytraSpaceFlight = true;
 com.example.examplemod.compat.immptl.ImmersivePortalsBackend.reconcile(s);
 p.setGameMode(net.minecraft.world.level.GameType.CREATIVE);
