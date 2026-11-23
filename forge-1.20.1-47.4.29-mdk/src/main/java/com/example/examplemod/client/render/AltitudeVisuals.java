@@ -40,6 +40,7 @@ public final class AltitudeVisuals {
     private static final ResourceLocation OVERWORLD_TYPE = new ResourceLocation("minecraft", "overworld");
     private static final ResourceLocation SPACE_TYPE = new ResourceLocation("rocketmod", "space_type");
     private static final double PLANET_RADIUS = 1536;
+    private static final PlanetVertex[] PLANET_MESH = createPlanetMesh();
     private static double anchorX;
     private static double anchorZ;
     private static boolean anchored;
@@ -242,23 +243,15 @@ public final class AltitudeVisuals {
         RenderSystem.enableCull();
         BufferBuilder b = Tesselator.getInstance().getBuilder();
         b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        Matrix4f m = pose.last().pose();
         double altitude = virtualAltitude(camera.y, space) - 64;
         double scale = 80 / (PLANET_RADIUS + Math.max(1, altitude));
-        double centerY = -PLANET_RADIUS;
         pose.pushPose();
         // Render the distant proxy inside the sky frustum while preserving its angular size.
         pose.scale((float) scale, (float) scale, (float) scale);
         pose.translate(anchorX-camera.x,-altitude,anchorZ-camera.z);
-        m=pose.last().pose();
-        int latitudes = 40, longitudes = 80;
-        for (int lat = 0; lat < latitudes; lat++) for (int lon = 0; lon < longitudes; lon++) {
-            float p0=(float)(-Math.PI/2+Math.PI*lat/latitudes), p1=(float)(-Math.PI/2+Math.PI*(lat+1)/latitudes);
-            float t0=(float)(Math.PI*2*lon/longitudes), t1=(float)(Math.PI*2*(lon+1)/longitudes);
-            Vec3 a=planetPoint(p0,t0,centerY), c=planetPoint(p1,t0,centerY);
-            Vec3 d=planetPoint(p1,t1,centerY), e=planetPoint(p0,t1,centerY);
-            planetVertex(b,m,a,p0,t0,alpha); planetVertex(b,m,c,p1,t0,alpha); planetVertex(b,m,d,p1,t1,alpha);
-            planetVertex(b,m,a,p0,t0,alpha); planetVertex(b,m,d,p1,t1,alpha); planetVertex(b,m,e,p0,t1,alpha);
+        Matrix4f m = pose.last().pose();
+        for (PlanetVertex v : PLANET_MESH) {
+            vertex(b, m, v.point, v.red, v.green, v.blue, alpha);
         }
         BufferUploader.drawWithShader(b.end());
         pose.popPose();
@@ -267,22 +260,95 @@ public final class AltitudeVisuals {
         RenderSystem.disableBlend();
     }
 
-    private static Vec3 planetPoint(float latitude, float longitude, double centerY) {
-        float c=(float)Math.cos(latitude);
-        return new Vec3(PLANET_RADIUS*c*(float)Math.cos(longitude), centerY+PLANET_RADIUS*(float)Math.sin(latitude),
-                PLANET_RADIUS*c*(float)Math.sin(longitude));
+    private record PlanetVertex(Vec3 point, float red, float green, float blue) {}
+
+    private static PlanetVertex[] createPlanetMesh() {
+        int latitudes = 64, longitudes = 128;
+        PlanetVertex[][] grid = new PlanetVertex[latitudes + 1][longitudes + 1];
+        for (int lat = 0; lat <= latitudes; lat++) {
+            double latitude = -Math.PI / 2 + Math.PI * lat / latitudes;
+            for (int lon = 0; lon < longitudes; lon++) {
+                double longitude = Math.PI * 2 * lon / longitudes;
+                Vec3 normal = lat == 0 ? new Vec3(0, -1, 0)
+                        : lat == latitudes ? new Vec3(0, 1, 0)
+                        : new Vec3(Math.cos(latitude) * Math.cos(longitude), Math.sin(latitude),
+                                Math.cos(latitude) * Math.sin(longitude));
+                grid[lat][lon] = planetVertex(normal);
+            }
+            grid[lat][longitudes] = grid[lat][0];
+        }
+        PlanetVertex[] triangles = new PlanetVertex[latitudes * longitudes * 6];
+        int next = 0;
+        for (int lat = 0; lat < latitudes; lat++) for (int lon = 0; lon < longitudes; lon++) {
+            triangles[next++] = grid[lat][lon];
+            triangles[next++] = grid[lat + 1][lon];
+            triangles[next++] = grid[lat + 1][lon + 1];
+            triangles[next++] = grid[lat][lon];
+            triangles[next++] = grid[lat + 1][lon + 1];
+            triangles[next++] = grid[lat][lon + 1];
+        }
+        return triangles;
     }
 
-    private static void planetVertex(BufferBuilder b, Matrix4f m, Vec3 point, float latitude, float longitude, float alpha) {
-        double noise=Math.sin(longitude*3.1+Math.sin(latitude*7))*Math.cos(latitude*4.2-longitude*1.7)
-                +0.42*Math.sin(longitude*8.3+latitude*5.4);
-        boolean land=noise>0.34+0.14*Math.sin(latitude*2);
-        float r=land?0.25f:0.035f, g=land?0.38f:0.16f, blue=land?0.20f:0.42f;
-        float polar=Mth.clamp(((float) Math.abs(point.z / PLANET_RADIUS)-0.88f)*8,0,1);
-        r=Mth.lerp(polar,r,0.78f); g=Mth.lerp(polar,g,0.87f); blue=Mth.lerp(polar,blue,0.92f);
-        float light=0.45f + 0.55f * Math.max(0, (float) ((point.x*0.45 + (point.y+PLANET_RADIUS)*0.75 + point.z*0.4) / PLANET_RADIUS));
-        r*=light; g*=light; blue*=light;
-        vertex(b,m,point,r,g,blue,alpha);
+    private static PlanetVertex planetVertex(Vec3 normal) {
+        // Cartesian noise is continuous at both poles and across the longitude seam.
+        double terrain = planetNoise(normal.x * 3.4 + 11, normal.y * 3.4 - 7, normal.z * 3.4 + 23);
+        float land = FlightMath.smoothRange(terrain, 0.48, 0.55);
+        float shelf = FlightMath.smoothRange(terrain, 0.39, 0.5);
+        float dry = FlightMath.smoothRange(planetNoise(normal.x * 5 - 31, normal.y * 5 + 19,
+                normal.z * 5 + 7) - Math.abs(normal.z) * 0.12, 0.46, 0.61);
+        float mountain = FlightMath.smoothRange(terrain, 0.62, 0.75);
+        float r = Mth.lerp(land, Mth.lerp(shelf, 0.025f, 0.055f), Mth.lerp(dry, 0.16f, 0.57f));
+        float g = Mth.lerp(land, Mth.lerp(shelf, 0.095f, 0.26f), Mth.lerp(dry, 0.34f, 0.49f));
+        float blue = Mth.lerp(land, Mth.lerp(shelf, 0.29f, 0.40f), Mth.lerp(dry, 0.14f, 0.28f));
+        r = Mth.lerp(mountain * land, r, 0.55f);
+        g = Mth.lerp(mountain * land, g, 0.56f);
+        blue = Mth.lerp(mountain * land, blue, 0.54f);
+        float ice = FlightMath.smoothRange(Math.abs(normal.z) + (terrain - 0.5) * 0.14, 0.82, 0.96);
+        r = Mth.lerp(ice, r, 0.79f);
+        g = Mth.lerp(ice, g, 0.88f);
+        blue = Mth.lerp(ice, blue, 0.93f);
+        float cloud = FlightMath.smoothRange(planetNoise(normal.x * 7 + 37, normal.y * 7 + 13,
+                normal.z * 7 - 17), 0.55, 0.68) * 0.68f;
+        r = Mth.lerp(cloud, r, 0.91f);
+        g = Mth.lerp(cloud, g, 0.94f);
+        blue = Mth.lerp(cloud, blue, 0.98f);
+        float light = 0.34f + 0.66f * Math.max(0,
+                (float) (normal.x * 0.45 + normal.y * 0.75 + normal.z * 0.4));
+        Vec3 point = normal.scale(PLANET_RADIUS).add(0, -PLANET_RADIUS, 0);
+        return new PlanetVertex(point, r * light, g * light, blue * light);
+    }
+
+    private static double planetNoise(double x, double y, double z) {
+        double sum = 0, weight = 0.57, total = 0;
+        for (int octave = 0; octave < 4; octave++) {
+            int ix = Mth.floor(x), iy = Mth.floor(y), iz = Mth.floor(z);
+            double fx = noiseFade(x - ix), fy = noiseFade(y - iy), fz = noiseFade(z - iz);
+            double lower = Mth.lerp(fy,
+                    Mth.lerp(fx, noiseCell(ix, iy, iz), noiseCell(ix + 1, iy, iz)),
+                    Mth.lerp(fx, noiseCell(ix, iy + 1, iz), noiseCell(ix + 1, iy + 1, iz)));
+            double upper = Mth.lerp(fy,
+                    Mth.lerp(fx, noiseCell(ix, iy, iz + 1), noiseCell(ix + 1, iy, iz + 1)),
+                    Mth.lerp(fx, noiseCell(ix, iy + 1, iz + 1), noiseCell(ix + 1, iy + 1, iz + 1)));
+            sum += Mth.lerp(fz, lower, upper) * weight;
+            total += weight;
+            x = x * 2.03 + 17.1;
+            y = y * 2.03 - 11.7;
+            z = z * 2.03 + 5.3;
+            weight *= 0.48;
+        }
+        return sum / total;
+    }
+
+    private static double noiseFade(double t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    private static double noiseCell(int x, int y, int z) {
+        long hash = x * 0x632be59bd9b4e019L ^ y * 0x9e3779b97f4a7c15L ^ z * 0x85157af5d66d76d9L;
+        hash = (hash ^ (hash >>> 30)) * 0xbf58476d1ce4e5b9L;
+        hash = (hash ^ (hash >>> 27)) * 0x94d049bb133111ebL;
+        return ((hash ^ (hash >>> 31)) >>> 11) * 0x1.0p-53;
     }
 
     private static Vec3 sphere(float r, float latitude, float longitude) {
