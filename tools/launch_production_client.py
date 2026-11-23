@@ -216,11 +216,10 @@ def main():
                  "version_type": "release", "natives_directory": str(natives),
                  "launcher_name": "rocket-production-validation", "launcher_version": "1",
                  "library_directory": str(libraries), "classpath_separator": ";",
-                 "classpath": ";".join([str(path) for _, path in artifacts] + [
-                     str(libraries / "net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-srg.jar"),
-                     str(libraries / "net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-extra.jar"),
-                     str(libraries / "net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-client.jar"),
-                     str(client)]),
+                 # CommonClientLaunchHandler locates SRG/extra jars and merges them
+                 # with ForgeClientLaunchHandler's patched client jar as minecraft.
+                 # Adding them here creates a second automatic module named client.
+                 "classpath": ";".join(str(path) for _, path in artifacts),
                  "resolution_width": "1280", "resolution_height": "720",
                  "quickPlayPath": str(game / "quickPlay.json"),
                  "quickPlayMultiplayer": args.server or "", "quickPlaySingleplayer": args.world or ""}
