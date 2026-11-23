@@ -25,8 +25,13 @@ def setup(ticks):
     execute(RESET)
     delay(ticks)
     origin = execute(STATE)
-    execute(START.replace("@X@", str(origin["x"])).replace("@Z@", str(origin["z"]))
+    execute(START.replace("up ? -90 : 90", "up ? -40 : 40")
+            .replace("@X@", str(origin["x"])).replace("@Z@", str(origin["z"]))
             .replace("@FPS@", "30").replace("@SPEED@", "1.5"))
+    execute("net.minecraft.client.Minecraft.getInstance().execute(() -> { "
+            "Object driver = System.getProperties().remove(\"rocketmod.test.driver\"); "
+            "if (driver != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(driver); "
+            "}); return \"natural recovery, no velocity driver\";")
     time.sleep(1)
     execute(ARM)
 
@@ -35,18 +40,31 @@ def wait_case(name, ticks, target, report):
     setup(ticks)
     began = time.monotonic()
     samples = []
+    report[name] = {"result": "RUNNING", "samples": samples}
     held = False
+    boosted = False
     while time.monotonic() - began < 25:
         state = execute(STATE)
         samples.append({"elapsed": time.monotonic() - began, **state})
         held |= state["status"].startswith("HOLDING") and state["noGravity"]
+        if held and target == "cross" and state["clientArmed"] and not state["noGravity"] and not boosted:
+            execute(BASE + """
+net.minecraft.world.item.ItemStack firework = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.FIREWORK_ROCKET);
+firework.getOrCreateTagElement("Fireworks").putByte("Flight", (byte) 3);
+p.serverLevel().addFreshEntity(new net.minecraft.world.entity.projectile.FireworkRocketEntity(p.level(), firework, p));
+return "fresh vanilla firework after readiness wait exhausted the original boost";
+""")
+            boosted = True
         if state["dimension"] == "rocketmod:space":
             if target != "cross" or not held:
                 raise RuntimeError(f"Unexpected crossing or no safety wait: {name}")
-            report[name] = {"result": "PASS", "samples": samples}
-            print(f"PASS {name}: held safely before real Ready; natural crossing resumed", flush=True)
+            held_samples = [sample["y"] for sample in samples if sample["status"].startswith("HOLDING")]
+            if len(held_samples) > 1 and max(held_samples) - min(held_samples) > 1.5:
+                raise RuntimeError("Waiting position drifted by more than 1.5 blocks")
+            report[name] = {"result": "PASS", "freshVanillaFirework": boosted, "samples": samples}
+            print(f"PASS {name}: stable safety hold, Ready recovery, vanilla propulsion crossing", flush=True)
             return
-        if state["y"] > 504:
+        if not state["clientArmed"] and state["y"] > 504:
             raise RuntimeError(f"Unsafe source position during wait: {state}")
         if target == "timeout" and time.monotonic() - began > 10 and held and state["leases"] == 0:
             if state["noGravity"]:

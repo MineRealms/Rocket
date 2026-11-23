@@ -54,6 +54,9 @@ public final class ClientFlightState {
     private static String serverStatus = "no server configuration";
     private static double serverAltitude;
     private static FlightPhase serverPhase = FlightPhase.GROUND;
+    private static Vec3 heldPosition;
+    private static Vec3 heldVelocity = Vec3.ZERO;
+    private static boolean oldNoGravity;
 
     private ClientFlightState() {}
 
@@ -148,7 +151,18 @@ public final class ClientFlightState {
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+        if (event.phase == TickEvent.Phase.START) {
+            Player player = Minecraft.getInstance().player;
+            if (player != null && heldPosition != null) {
+                if (preparation == null || !player.level().dimension().equals(preparation.source()) || !player.isFallFlying()) {
+                    releaseHold(false);
+                } else {
+                    player.setPos(heldPosition.x, heldPosition.y, heldPosition.z);
+                    player.setDeltaMovement(Vec3.ZERO);
+                }
+            }
+            return;
+        }
         ticks++;
         Player player = Minecraft.getInstance().player;
         if (!enabled() || player == null || preparation == null) return;
@@ -158,13 +172,18 @@ public final class ClientFlightState {
             boolean upward = preparation.source().equals(Level.OVERWORLD);
             double distance = upward ? threshold - player.getEyeY() : player.getEyeY() - FlightMath.SPACE_ENTRY_HEIGHT;
             double toward = Math.max(0, player.getDeltaMovement().y * (upward ? 1 : -1));
-            if (distance <= Math.max(12, toward * toward / 0.3 + toward * 6)) {
-                player.setDeltaMovement(Vec3.ZERO);
-                if (distance < 10) {
-                    player.setPos(player.getX(), (upward ? threshold - 12 : FlightMath.SPACE_ENTRY_HEIGHT + 12) - player.getEyeHeight(), player.getZ());
+            if (heldPosition != null || distance <= Math.max(12, toward * toward / 0.3 + toward * 6)) {
+                if (heldPosition == null) {
+                    heldVelocity = player.getDeltaMovement();
+                    oldNoGravity = player.isNoGravity();
+                    double safeY = (upward ? threshold - 12 : FlightMath.SPACE_ENTRY_HEIGHT + 12) - player.getEyeHeight();
+                    heldPosition = new Vec3(player.getX(), safeY, player.getZ());
                 }
+                player.setNoGravity(true);
+                player.setDeltaMovement(Vec3.ZERO);
+                player.setPos(heldPosition.x, heldPosition.y, heldPosition.z);
             }
-        }
+        } else releaseHold(true);
     }
 
     @SubscribeEvent
@@ -248,6 +267,7 @@ public final class ClientFlightState {
     }
 
     private static void clearPreparation() {
+        releaseHold(false);
         preparation = null;
         armed = false;
         locallyReady = false;
@@ -256,5 +276,16 @@ public final class ClientFlightState {
         replySequence = 0;
         targetFrameTick = -1000;
         readiness = "no session";
+    }
+
+    private static void releaseHold(boolean resume) {
+        if (heldPosition == null) return;
+        Player player = Minecraft.getInstance().player;
+        if (player != null) {
+            player.setNoGravity(oldNoGravity);
+            if (resume) player.setDeltaMovement(heldVelocity);
+        }
+        heldPosition = null;
+        heldVelocity = Vec3.ZERO;
     }
 }

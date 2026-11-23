@@ -7,6 +7,7 @@ import com.example.examplemod.flight.FlightPhase;
 import com.example.examplemod.network.FlightNetwork;
 import com.mojang.logging.LogUtils;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -93,6 +94,7 @@ public final class FlightTransferCoordinator {
                             restoreGravity(session);
                             player.setDeltaMovement(velocity);
                             player.hurtMarked = true;
+                            player.connection.send(new ClientboundSetEntityMotionPacket(player));
                         }
                     } else holdBeforeBoundary(player, session);
                 }
@@ -184,11 +186,11 @@ public final class FlightTransferCoordinator {
     private static void holdBeforeBoundary(ServerPlayer player, Session session) {
         double sign = session.source.equals(Level.OVERWORLD) ? 1 : -1;
         double towardSpeed = Math.max(0, player.getDeltaMovement().y * sign);
+        if (!session.holding && towardSpeed > 0.05) session.heldVelocity = player.getDeltaMovement();
         double brakingDistance = Math.max(12, towardSpeed * towardSpeed / 0.3 + towardSpeed * 6);
         if (session.holding || distanceToBoundary(player) <= brakingDistance) {
             if (!session.holding) {
                 session.oldNoGravity = player.isNoGravity();
-                session.heldVelocity = player.getDeltaMovement();
                 session.holding = true;
                 double boundary = sign > 0 ? threshold : FlightMath.SPACE_ENTRY_HEIGHT;
                 double safeY = boundary - sign * 12 - player.getEyeHeight();

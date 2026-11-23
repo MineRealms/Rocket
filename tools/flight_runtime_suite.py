@@ -23,6 +23,8 @@ j.addProperty("uuid", p.getUUID().toString());
 j.addProperty("leases", com.example.examplemod.compat.immptl.ImmersivePortalsBackend.getChunkLeaseCount());
 j.addProperty("portals", com.example.examplemod.compat.immptl.ImmersivePortalsBackend.getOwnedPortalCount(s));
 j.addProperty("status", com.example.examplemod.transition.FlightTransferCoordinator.status(p));
+j.addProperty("clientArmed", com.example.examplemod.client.flight.ClientFlightState.isArmed());
+j.addProperty("clientReady", com.example.examplemod.client.flight.ClientFlightState.readinessStatus());
 return j.toString();
 """
 START = BASE + """
