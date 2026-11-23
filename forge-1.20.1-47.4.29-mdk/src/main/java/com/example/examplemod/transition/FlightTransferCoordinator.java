@@ -30,6 +30,7 @@ public final class FlightTransferCoordinator {
     private static final double PREPARE_DISTANCE = 160;
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
     private static final Map<UUID, Long> RETRY_AFTER = new HashMap<>();
+    private static final Map<UUID, Long> ARRIVAL_GRACE = new HashMap<>();
     private static long revision;
     private static long nextSequence;
     private static boolean enabled;
@@ -62,6 +63,7 @@ public final class FlightTransferCoordinator {
                     if (!session.crossed) {
                         session.crossed = true;
                         session.crossedTick = now;
+                        ARRIVAL_GRACE.put(player.getUUID(), now + 20);
                         LOGGER.info("Flight transfer crossed id={} player={} H={} velocity={}", session.id,
                                 player.getGameProfile().getName(), altitude(player), player.getDeltaMovement());
                     }
@@ -96,11 +98,14 @@ public final class FlightTransferCoordinator {
                 }
             } else if (enabled && eligible(player) && approachingBoundary(player) && distanceToBoundary(player) >= -8
                     && distanceToBoundary(player) <= PREPARE_DISTANCE
-                    && now >= RETRY_AFTER.getOrDefault(player.getUUID(), 0L)) {
+                    && now >= RETRY_AFTER.getOrDefault(player.getUUID(), 0L)
+                    && now >= ARRIVAL_GRACE.getOrDefault(player.getUUID(), 0L)) {
                 if (SESSIONS.size() < MAX_SESSIONS) begin(player, now);
                 else preventUnpreparedCrossing(player);
             }
-            if (enabled && eligible(player) && SESSIONS.get(player.getUUID()) == null) {
+            if (enabled && eligible(player) && approachingBoundary(player)
+                    && now >= ARRIVAL_GRACE.getOrDefault(player.getUUID(), 0L)
+                    && SESSIONS.get(player.getUUID()) == null) {
                 preventUnpreparedCrossing(player);
             }
             if (now % 5 == 0) send(player, FlightNetwork.Kind.SNAPSHOT, SESSIONS.get(player.getUUID()), status(player));
@@ -173,7 +178,7 @@ public final class FlightTransferCoordinator {
     }
 
     private static boolean approachingBoundary(ServerPlayer player) {
-        return player.getDeltaMovement().y * (player.level().dimension().equals(Level.OVERWORLD) ? 1 : -1) >= -0.05;
+        return player.getDeltaMovement().y * (player.level().dimension().equals(Level.OVERWORLD) ? 1 : -1) > 0.05;
     }
 
     private static void holdBeforeBoundary(ServerPlayer player, Session session) {
@@ -227,6 +232,7 @@ public final class FlightTransferCoordinator {
     public static void logout(ServerPlayer player) {
         abort(player.getUUID(), "logout", 0);
         RETRY_AFTER.remove(player.getUUID());
+        ARRIVAL_GRACE.remove(player.getUUID());
     }
 
     private static void complete(Session session, String reason) {
@@ -240,6 +246,7 @@ public final class FlightTransferCoordinator {
     public static void reset(String reason) {
         for (UUID playerId : java.util.Set.copyOf(SESSIONS.keySet())) abort(playerId, reason, 0);
         RETRY_AFTER.clear();
+        ARRIVAL_GRACE.clear();
     }
 
     public static int leaseCount() { return SESSIONS.size(); }

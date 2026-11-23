@@ -32,12 +32,35 @@ p.setNoGravity(false);
 boolean up = p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD);
 double boundary = up ? com.example.examplemod.Config.flightTransitionAltitude : 64.0;
 p.teleportTo(p.serverLevel(), @X@, boundary + (up ? -90 : 90), @Z@, 0, up ? -85 : 85);
-p.getAbilities().flying = false; p.onUpdateAbilities();
-p.setOnGround(false); p.startFallFlying();
-p.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, up ? 0.6 : -0.6, 0)); p.hurtMarked = true;
+p.getAbilities().flying = true; p.onUpdateAbilities();
+p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO); p.hurtMarked = true;
 net.minecraft.client.Minecraft c = net.minecraft.client.Minecraft.getInstance();
-c.execute(() -> { c.options.pauseOnLostFocus = false; c.options.framerateLimit().set(@FPS@); c.setScreen(null); });
+c.execute(() -> {
+    c.options.pauseOnLostFocus = false; c.options.framerateLimit().set(@FPS@); c.setScreen(null);
+    Object old = System.getProperties().remove("rocketmod.test.driver");
+    if (old != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(old);
+    final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> source = c.player.level().dimension();
+    java.util.function.Consumer<net.minecraftforge.event.TickEvent.ClientTickEvent> driver = event -> {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END || c.player == null
+                || !c.player.level().dimension().equals(source) || !c.player.isFallFlying()) return;
+        if (com.example.examplemod.client.flight.ClientFlightState.isArmed()) {
+            c.player.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, up ? @SPEED@ : -@SPEED@, 0));
+        }
+    };
+    net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(net.minecraftforge.eventbus.api.EventPriority.LOWEST,
+        false, net.minecraftforge.event.TickEvent.ClientTickEvent.class, driver);
+    System.getProperties().put("rocketmod.test.driver", driver);
+});
 return "same-dimension flight setup";
+"""
+ARM = BASE + """
+boolean up = p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD);
+p.getAbilities().flying = false; p.onUpdateAbilities(); p.setOnGround(false); p.startFallFlying();
+p.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, up ? 1.5 : -1.5, 0)); p.hurtMarked = true;
+net.minecraft.world.item.ItemStack firework = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.FIREWORK_ROCKET);
+firework.getOrCreateTagElement("Fireworks").putByte("Flight", (byte) 3);
+p.serverLevel().addFreshEntity(new net.minecraft.world.entity.projectile.FireworkRocketEntity(p.level(), firework, p));
+return "natural Elytra propulsion started after position acknowledgment";
 """
 KICK = BASE + """
 if (com.example.examplemod.transition.FlightTransferCoordinator.status(p).startsWith("READY")) {
@@ -48,7 +71,9 @@ return "velocity pulse; no dimension teleport";
 """
 RESTORE = BASE + """
 net.minecraft.client.Minecraft c = net.minecraft.client.Minecraft.getInstance();
-c.execute(() -> { com.example.examplemod.client.flight.ClientFlightState.setDebugReadyDelayTicks(0);
+c.execute(() -> { Object driver = System.getProperties().remove("rocketmod.test.driver");
+    if (driver != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(driver);
+    com.example.examplemod.client.flight.ClientFlightState.setDebugReadyDelayTicks(0);
     c.options.framerateLimit().set(120); });
 p.stopFallFlying(); com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setNoGravity(false); p.getAbilities().flying = true; p.onUpdateAbilities();
@@ -82,7 +107,9 @@ def main():
             # Four new observation regions exercise cold target chunks during the run.
             offset = (leg // 10) * 256
             start = START.replace("@X@", str(origin["x"] + offset)).replace("@Z@", str(origin["z"]))
-            execute(start.replace("@FPS@", str(fps)))
+            execute(start.replace("@FPS@", str(fps)).replace("@SPEED@", str(speed)))
+            time.sleep(1)
+            execute(ARM)
             source = execute(STATE)
             target = "rocketmod:space" if leg % 2 == 0 else "minecraft:overworld"
             began = time.monotonic()
@@ -99,7 +126,6 @@ def main():
                     print(f"PASS {leg + 1}/{args.rounds * 2}: {target} H={state['h']:.2f} vy={state['velocityY']:.3f}", flush=True)
                     time.sleep(0.7)
                     break
-                execute(KICK.replace("@SPEED@", str(speed)))
                 time.sleep(0.25)
             else:
                 raise RuntimeError(f"Crossing {leg} timed out: {state}")

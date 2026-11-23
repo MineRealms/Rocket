@@ -26,6 +26,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ViewportEvent;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import qouteall.imm_ptl.core.ClientWorldLoader;
@@ -38,6 +39,10 @@ import java.util.Random;
 public final class AltitudeVisuals {
     private static final ResourceLocation OVERWORLD_TYPE = new ResourceLocation("minecraft", "overworld");
     private static final ResourceLocation SPACE_TYPE = new ResourceLocation("rocketmod", "space_type");
+    private static final double PLANET_RADIUS = 1536;
+    private static double anchorX;
+    private static double anchorZ;
+    private static boolean anchored;
 
     private AltitudeVisuals() {}
 
@@ -83,6 +88,9 @@ public final class AltitudeVisuals {
         private WorldRender() {}
 
         @SubscribeEvent
+        public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { anchored = false; }
+
+        @SubscribeEvent
         public static void planet(RenderLevelStageEvent event) {
             if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SKY) return;
             Camera camera = event.getCamera();
@@ -93,6 +101,11 @@ public final class AltitudeVisuals {
                     .orElseGet(() -> camera.getEntity().level().dimension());
             boolean space = passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION);
             double h = virtualAltitude(camera.getPosition().y, space);
+            if (!anchored || (!space && h < 128)) {
+                anchorX = camera.getPosition().x;
+                anchorZ = camera.getPosition().z;
+                anchored = true;
+            }
             float alpha = FlightMath.smoothRange(h, 128, 520);
             if (!passDimension.equals(Level.OVERWORLD) && !passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION)) return;
             try (RenderState ignored = new RenderState()) {
@@ -226,16 +239,19 @@ public final class AltitudeVisuals {
         RenderSystem.defaultBlendFunc();
         RenderSystem.enableDepthTest();
         RenderSystem.depthMask(false);
-        RenderSystem.disableCull();
+        RenderSystem.enableCull();
         BufferBuilder b = Tesselator.getInstance().getBuilder();
         b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
         Matrix4f m = pose.last().pose();
-        double offset = space ? (ClientFlightState.hasServerConfig() ? ClientFlightState.transitionAltitude() : 512.0) - 64.0 : 0.0;
-        double centerY = -2048.0-offset;
+        double altitude = virtualAltitude(camera.y, space) - 64;
+        double scale = 80 / (PLANET_RADIUS + Math.max(1, altitude));
+        double centerY = -PLANET_RADIUS;
         pose.pushPose();
-        pose.translate(-camera.x,-camera.y,-camera.z);
+        // Render the distant proxy inside the sky frustum while preserving its angular size.
+        pose.scale((float) scale, (float) scale, (float) scale);
+        pose.translate(anchorX-camera.x,-altitude,anchorZ-camera.z);
         m=pose.last().pose();
-        int latitudes = 64, longitudes = 128;
+        int latitudes = 40, longitudes = 80;
         for (int lat = 0; lat < latitudes; lat++) for (int lon = 0; lon < longitudes; lon++) {
             float p0=(float)(-Math.PI/2+Math.PI*lat/latitudes), p1=(float)(-Math.PI/2+Math.PI*(lat+1)/latitudes);
             float t0=(float)(Math.PI*2*lon/longitudes), t1=(float)(Math.PI*2*(lon+1)/longitudes);
@@ -253,8 +269,8 @@ public final class AltitudeVisuals {
 
     private static Vec3 planetPoint(float latitude, float longitude, double centerY) {
         float c=(float)Math.cos(latitude);
-        return new Vec3(4096*c*(float)Math.cos(longitude), centerY+4096*(float)Math.sin(latitude),
-                4096*c*(float)Math.sin(longitude));
+        return new Vec3(PLANET_RADIUS*c*(float)Math.cos(longitude), centerY+PLANET_RADIUS*(float)Math.sin(latitude),
+                PLANET_RADIUS*c*(float)Math.sin(longitude));
     }
 
     private static void planetVertex(BufferBuilder b, Matrix4f m, Vec3 point, float latitude, float longitude, float alpha) {
@@ -262,8 +278,10 @@ public final class AltitudeVisuals {
                 +0.42*Math.sin(longitude*8.3+latitude*5.4);
         boolean land=noise>0.34+0.14*Math.sin(latitude*2);
         float r=land?0.25f:0.035f, g=land?0.38f:0.16f, blue=land?0.20f:0.42f;
-        float polar=Mth.clamp((Math.abs(latitude)-1.18f)*2.6f,0,1);
+        float polar=Mth.clamp(((float) Math.abs(point.z / PLANET_RADIUS)-0.88f)*8,0,1);
         r=Mth.lerp(polar,r,0.78f); g=Mth.lerp(polar,g,0.87f); blue=Mth.lerp(polar,blue,0.92f);
+        float light=0.45f + 0.55f * Math.max(0, (float) ((point.x*0.45 + (point.y+PLANET_RADIUS)*0.75 + point.z*0.4) / PLANET_RADIUS));
+        r*=light; g*=light; blue*=light;
         vertex(b,m,point,r,g,blue,alpha);
     }
 
