@@ -1,0 +1,7 @@
+/forge-*-mdk.zip
+**/run*/
+**/build/
+**/.gradle/
+**/.idea/
+**/RosettaRemoteDebugBridge/
+*.log
