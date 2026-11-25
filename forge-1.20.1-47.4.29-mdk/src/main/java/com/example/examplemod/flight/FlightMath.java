@@ -15,7 +15,7 @@ public final class FlightMath {
 
     public static float smoothRange(double altitude, double start, double end) {
         if (!Double.isFinite(altitude) || !Double.isFinite(start) || !Double.isFinite(end) || end <= start) {
-            throw new IllegalArgumentException("Invalid altitude range");
+            return 0;
         }
         double t = Math.max(0, Math.min(1, (altitude - start) / (end - start)));
         return (float) (t * t * (3 - 2 * t));

@@ -34,17 +34,22 @@ public final class FlightTransferCoordinator {
     private static final Map<UUID, Long> ARRIVAL_GRACE = new HashMap<>();
     private static long revision;
     private static long nextSequence;
+    private static long configLoadRevision = -1;
+    private static boolean configurationDirty = true;
     private static boolean enabled;
-    private static double threshold = 512;
+    private static double threshold = 1600;
 
     private FlightTransferCoordinator() {}
 
     public static void configure(MinecraftServer server, boolean newEnabled, double newThreshold) {
-        if (revision != 0 && enabled == newEnabled && threshold == newThreshold) return;
+        if (!configurationDirty && configLoadRevision == Config.loadRevision
+                && revision != 0 && enabled == newEnabled && threshold == newThreshold) return;
         reset("configuration changed");
         enabled = newEnabled;
         threshold = newThreshold;
         revision++;
+        configLoadRevision = Config.loadRevision;
+        configurationDirty = false;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) sendConfig(player);
     }
 
@@ -53,6 +58,7 @@ public final class FlightTransferCoordinator {
     }
 
     public static void tick(MinecraftServer server) {
+        configure(server, enabled, threshold);
         long now = server.getTickCount();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             Session session = SESSIONS.get(player.getUUID());
@@ -133,8 +139,17 @@ public final class FlightTransferCoordinator {
     public static void onReply(ServerPlayer player, FlightNetwork.ClientReply reply) {
         Session session = SESSIONS.get(player.getUUID());
         if (session == null || !session.id.equals(reply.id()) || reply.revision() != revision
-                || reply.sequence() <= session.lastReplySequence || !enabled) return;
+                || reply.sequence() < 1 || reply.sequence() > FlightNetwork.MAX_REPLY_SEQUENCE
+                || reply.sequence() != session.lastReplySequence + 1 || !enabled) return;
+        long now = player.getServer().getTickCount();
+        if (session.replyTick != now) {
+            session.replyTick = now;
+            session.repliesThisTick = 0;
+        }
+        // Consume ordered replies even when throttled so a network burst cannot stall the next reply.
         session.lastReplySequence = reply.sequence();
+        if (session.repliesThisTick >= 2) return;
+        session.repliesThisTick++;
         session.clientDetail = reply.detail();
         if (reply.confirmed()) {
             if (player.level().dimension().equals(session.target)) session.confirmed = true;
@@ -250,6 +265,7 @@ public final class FlightTransferCoordinator {
         for (UUID playerId : java.util.Set.copyOf(SESSIONS.keySet())) abort(playerId, reason, 0);
         RETRY_AFTER.clear();
         ARRIVAL_GRACE.clear();
+        configurationDirty = true;
     }
 
     public static int leaseCount() { return SESSIONS.size(); }
@@ -288,6 +304,8 @@ public final class FlightTransferCoordinator {
         final long sequence;
         final boolean wasGliding;
         long lastReplySequence;
+        long replyTick = -1;
+        int repliesThisTick;
         long crossedTick;
         boolean clientReady;
         boolean armed;

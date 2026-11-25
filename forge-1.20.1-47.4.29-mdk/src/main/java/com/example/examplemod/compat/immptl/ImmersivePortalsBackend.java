@@ -33,12 +33,13 @@ import qouteall.imm_ptl.core.portal.global_portals.GlobalPortalStorage;
 public final class ImmersivePortalsBackend {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final ResourceKey<Level> SPACE_DIMENSION = ResourceKey.create(
-            Registries.DIMENSION, new ResourceLocation(ExampleMod.MODID, "space"));
+            Registries.DIMENSION, ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "space"));
     public static final double SPACE_ENTRY_HEIGHT = 64.0;
     private static final String PORTAL_TAG = "rocketmod:debug_elytra_boundary";
     private static final double PORTAL_SIZE = 60_000_000.0;
     private static double installedAltitude = Double.NaN;
     private static boolean installedEnabled;
+    private static int nextInstallAttempt;
     private static final java.util.Set<java.util.UUID> RETURN_LANDINGS = new java.util.HashSet<>();
 
     private ImmersivePortalsBackend() {
@@ -50,6 +51,7 @@ public final class ImmersivePortalsBackend {
         RETURN_LANDINGS.clear();
         removeOwnedPortals(event.getServer());
         installedAltitude = Double.NaN;
+        nextInstallAttempt = 0;
         reconcile(event.getServer());
     }
 
@@ -116,12 +118,13 @@ public final class ImmersivePortalsBackend {
             return;
         }
 
+        if (enabled && server.getTickCount() < nextInstallAttempt) return;
         removeOwnedPortals(server);
         FlightTransferCoordinator.reset("flight boundaries changed");
-        FlightTransferCoordinator.configure(server, enabled, altitude);
-        installedEnabled = enabled;
-        installedAltitude = altitude;
         if (!enabled) {
+            FlightTransferCoordinator.configure(server, false, altitude);
+            installedEnabled = false;
+            installedAltitude = altitude;
             LOGGER.info("Debug elytra flight disabled; removed ROCKET flight boundaries.");
             return;
         }
@@ -129,21 +132,33 @@ public final class ImmersivePortalsBackend {
         ServerLevel overworld = server.getLevel(Level.OVERWORLD);
         ServerLevel space = server.getLevel(SPACE_DIMENSION);
         if (overworld == null || space == null) {
+            nextInstallAttempt = server.getTickCount() + 100;
+            FlightTransferCoordinator.configure(server, false, altitude);
             LOGGER.warn("Cannot install ROCKET flight boundaries: Overworld or space dimension is missing.");
             return;
         }
 
-        createBoundary(overworld, space, altitude, SPACE_ENTRY_HEIGHT, false);
-        createBoundary(space, overworld, SPACE_ENTRY_HEIGHT, altitude, true);
+        if (!createBoundary(overworld, space, altitude, SPACE_ENTRY_HEIGHT, false)
+                || !createBoundary(space, overworld, SPACE_ENTRY_HEIGHT, altitude, true)) {
+            removeOwnedPortals(server);
+            nextInstallAttempt = server.getTickCount() + 100;
+            FlightTransferCoordinator.configure(server, false, altitude);
+            return;
+        }
+        installedEnabled = true;
+        installedAltitude = altitude;
+        nextInstallAttempt = 0;
+        FlightTransferCoordinator.configure(server, true, altitude);
         LOGGER.info("Debug elytra boundaries ready: Overworld Y={} <-> rocketmod:space Y={}; scale=1, rotation=0",
                 altitude, SPACE_ENTRY_HEIGHT);
     }
 
-    private static void createBoundary(ServerLevel source, ServerLevel destination,
+    private static boolean createBoundary(ServerLevel source, ServerLevel destination,
                                        double sourceY, double targetY, boolean normalUp) {
         DebugFlightPortal portal = DebugFlightPortalRegistry.DEBUG_FLIGHT_PORTAL.get().create(source);
         if (portal == null) {
-            throw new IllegalStateException("Could not create ROCKET debug flight portal");
+            LOGGER.error("Could not create ROCKET debug flight portal in {}", source.dimension().location());
+            return false;
         }
         portal.setOriginPos(new Vec3(0.0, sourceY, 0.0));
         portal.setOrientationAndSize(
@@ -154,10 +169,13 @@ public final class ImmersivePortalsBackend {
                 new Vec3(0.0, targetY, 0.0), null, 1.0);
         portal.portalTag = PORTAL_TAG;
         portal.teleportChangesScale = false;
+        // Share the outer sky/depth; IP otherwise replaces a view-distance-sized rectangle of sky.
+        portal.fuseView = true;
         portal.setInteractable(false);
         // Global portals are serialized/synced by IP, independently of normal entity chunk tracking.
         PortalAPI.addGlobalPortal(source, portal);
         portal.updateCache();
+        return true;
     }
 
     public static int getOwnedPortalCount(MinecraftServer server) {

@@ -36,7 +36,7 @@ import java.util.Map;
 public final class ClientFlightState {
     private static boolean configured;
     private static boolean enabled;
-    private static double threshold = 512;
+    private static double threshold = 1600;
     private static long revision;
     private static FlightNetwork.ServerMessage preparation;
     private static long latestPreparationSequence;
@@ -64,7 +64,7 @@ public final class ClientFlightState {
     public static final class Setup {
         @SubscribeEvent
         public static void setup(FMLClientSetupEvent event) {
-            event.enqueueWork(() -> FlightNetwork.setClientHandlers(ClientFlightState::receive, ClientFlightState::canCross));
+            FlightNetwork.setClientHandlers(ClientFlightState::receive, ClientFlightState::canCross);
         }
     }
 
@@ -98,6 +98,7 @@ public final class ClientFlightState {
         if (message.revision() < revision) return;
         if (!configured || message.revision() > revision) {
             clearPreparation();
+            latestPreparationSequence = 0;
             revision = message.revision();
             configured = true;
             enabled = message.enabled();
@@ -208,7 +209,9 @@ public final class ClientFlightState {
         boolean ready = result.startsWith("ready:");
         readiness = result;
         locallyReady = ready;
-        if (!sentReadiness || ready != lastReportedReady || ticks - lastReadinessReportTick >= 20) {
+        if ((!sentReadiness || ticks != lastReadinessReportTick)
+                && replySequence < FlightNetwork.MAX_REPLY_SEQUENCE - 1
+                && (!sentReadiness || ready != lastReportedReady || ticks - lastReadinessReportTick >= 20)) {
             FlightNetwork.reply(new FlightNetwork.ClientReply(preparation.id(), ++replySequence, revision, ready, false, result));
             sentReadiness = true;
             lastReportedReady = ready;

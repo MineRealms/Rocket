@@ -21,10 +21,11 @@ import java.util.function.Consumer;
 public final class FlightNetwork {
     private static final String VERSION = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(ExampleMod.MODID, "flight"), () -> VERSION, VERSION::equals, VERSION::equals);
+            ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "flight"), () -> VERSION, VERSION::equals, VERSION::equals);
     public static final UUID NONE = new UUID(0, 0);
-    private static Consumer<ServerMessage> clientReceiver = message -> {};
-    private static BiPredicate<Player, ResourceKey<Level>> clientGate = (player, destination) -> false;
+    public static final long MAX_REPLY_SEQUENCE = 512;
+    private static volatile Consumer<ServerMessage> clientReceiver = message -> {};
+    private static volatile BiPredicate<Player, ResourceKey<Level>> clientGate = (player, destination) -> false;
 
     private FlightNetwork() {}
 

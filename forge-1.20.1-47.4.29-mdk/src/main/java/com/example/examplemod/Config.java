@@ -9,6 +9,7 @@ import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -29,7 +30,7 @@ public class Config
 
     private static final ForgeConfigSpec.DoubleValue FLIGHT_TRANSITION_ALTITUDE = BUILDER
             .comment("Overworld portal plane for debug Elytra flight to space Y=64.")
-            .defineInRange("flightTransitionAltitude", 512.0, 384.0, 2048.0);
+            .defineInRange("flightTransitionAltitude", 1600.0, 384.0, 2048.0);
 
     private static final ForgeConfigSpec.BooleanValue DEBUG_ELYTRA_SPACE_FLIGHT = BUILDER
             .comment("Development only: allow unmounted Elytra gliding through the Overworld/space boundary.",
@@ -49,14 +50,17 @@ public class Config
 
     public static boolean logDirtBlock;
     public static int magicNumber;
-    public static volatile double flightTransitionAltitude = 512.0;
+    public static volatile double flightTransitionAltitude = 1600.0;
     public static volatile boolean debugElytraSpaceFlight = true;
     public static String magicNumberIntroduction;
-    public static Set<Item> items;
+    public static Set<Item> items = Set.of();
+    public static volatile long loadRevision;
 
     private static boolean validateItemName(final Object obj)
     {
-        return obj instanceof final String itemName && ForgeRegistries.ITEMS.containsKey(new ResourceLocation(itemName));
+        if (!(obj instanceof String itemName)) return false;
+        ResourceLocation id = ResourceLocation.tryParse(itemName);
+        return id != null && ForgeRegistries.ITEMS.containsKey(id) && ForgeRegistries.ITEMS.getValue(id) != null;
     }
 
     @SubscribeEvent
@@ -71,7 +75,11 @@ public class Config
 
         // convert the list of strings into a set of items
         items = ITEM_STRINGS.get().stream()
-                .map(itemName -> ForgeRegistries.ITEMS.getValue(new ResourceLocation(itemName)))
+                .map(ResourceLocation::tryParse)
+                .filter(Objects::nonNull)
+                .map(ForgeRegistries.ITEMS::getValue)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
+        loadRevision++;
     }
 }
