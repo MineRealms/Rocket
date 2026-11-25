@@ -1,60 +1,66 @@
 package com.example.examplemod.client.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferUploader;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.example.examplemod.ExampleMod;
 import com.example.examplemod.client.flight.ClientFlightState;
 import com.example.examplemod.compat.immptl.ImmersivePortalsBackend;
 import com.example.examplemod.flight.FlightMath;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.DimensionSpecialEffects;
 import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
-import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.material.FogType;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RegisterDimensionSpecialEffectsEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ViewportEvent;
-import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import qouteall.imm_ptl.core.ClientWorldLoader;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
-
-import java.util.Random;
+import org.lwjgl.opengl.GL14;
+import qouteall.imm_ptl.core.render.context_management.PortalRendering;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class AltitudeVisuals {
-    private static final ResourceLocation OVERWORLD_TYPE = new ResourceLocation("minecraft", "overworld");
-    private static final ResourceLocation SPACE_TYPE = new ResourceLocation("rocketmod", "space_type");
     private static double anchorX;
     private static double anchorZ;
     private static boolean anchored;
 
     private AltitudeVisuals() {}
 
-    private static boolean supportedLevel() {
+    @SubscribeEvent
+    public static void registerEffects(RegisterDimensionSpecialEffectsEvent event) {
+        event.register(ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), new RocketEffects());
+        event.register(ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "space_type"), new RocketEffects());
+    }
+
+    private static boolean fusedPass() {
+        return PortalRendering.isRendering() && PortalRendering.getRenderingPortal().isFuseView();
+    }
+
+    private static boolean spacePass() {
+        return Minecraft.getInstance().level != null
+                && Minecraft.getInstance().level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION);
+    }
+
+    private static boolean supportedPass() {
         var level = Minecraft.getInstance().level;
         return level != null && (level.dimension().equals(Level.OVERWORLD)
                 || level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
     }
 
-    @SubscribeEvent
-    public static void registerEffects(RegisterDimensionSpecialEffectsEvent event) {
-        event.register(OVERWORLD_TYPE, new RocketEffects(true));
-        event.register(SPACE_TYPE, new RocketEffects(false));
+    private static double height(Camera camera) {
+        return FlightMath.altitude(camera.getPosition().y, spacePass(), ClientFlightState.transitionAltitude());
     }
 
     @Mod.EventBusSubscriber(modid = ExampleMod.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
@@ -63,21 +69,22 @@ public final class AltitudeVisuals {
 
         @SubscribeEvent
         public static void fogColor(ViewportEvent.ComputeFogColor event) {
-            Camera camera = event.getCamera();
-            if (camera.getEntity() == null || !supportedLevel() || camera.getFluidInCamera() != FogType.NONE) return;
-            float atmo = atmosphere(ClientFlightState.altitude((float) event.getPartialTick()));
-            event.setRed(Mth.lerp(atmo, event.getRed(), 0.018f));
-            event.setGreen(Mth.lerp(atmo, event.getGreen(), 0.025f));
-            event.setBlue(Mth.lerp(atmo, event.getBlue(), 0.055f));
+            if (!supportedPass() || event.getCamera().getFluidInCamera() != FogType.NONE) return;
+            float weight = AtmosphereRenderer.darkness(height(event.getCamera()));
+            event.setRed(Mth.lerp(weight, event.getRed(), 0.055f));
+            event.setGreen(Mth.lerp(weight, event.getGreen(), 0.09f));
+            event.setBlue(Mth.lerp(weight, event.getBlue(), 0.15f));
         }
 
         @SubscribeEvent
         public static void fogDistance(ViewportEvent.RenderFog event) {
-            Camera camera = event.getCamera();
-            if (camera.getEntity() == null || !supportedLevel() || event.getType() != FogType.NONE) return;
-            float atmo = atmosphere(ClientFlightState.altitude((float) event.getPartialTick()));
-            event.scaleFarPlaneDistance(Mth.lerp(atmo, 0.42f, 1.0f));
-            event.setNearPlaneDistance(Mth.lerp(atmo, 0.0f, event.getNearPlaneDistance()));
+            if (!supportedPass() || event.getType() != FogType.NONE) return;
+            float weight = FlightMath.smoothRange(height(event.getCamera()), 180,
+                    ClientFlightState.transitionAltitude() * 0.7);
+            if (weight <= 0) return;
+            float far = Mth.lerp(weight, event.getFarPlaneDistance(), Math.max(1024, event.getFarPlaneDistance()));
+            event.setNearPlaneDistance(Math.max(0.25f, Mth.lerp(weight, event.getNearPlaneDistance(), far * 0.35f)));
+            event.setFarPlaneDistance(far);
             event.setCanceled(true);
         }
     }
@@ -91,167 +98,75 @@ public final class AltitudeVisuals {
 
         @SubscribeEvent
         public static void planet(RenderLevelStageEvent event) {
-            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SKY) return;
+            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SKY || !supportedPass() || fusedPass()) return;
             Camera camera = event.getCamera();
             if (camera.getEntity() == null) return;
-            var passDimension = ClientWorldLoader.worldRendererMap.entrySet().stream()
-                    .filter(entry -> entry.getValue() == event.getLevelRenderer())
-                    .map(java.util.Map.Entry::getKey).findFirst()
-                    .orElseGet(() -> camera.getEntity().level().dimension());
-            boolean space = passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION);
-            double h = virtualAltitude(camera.getPosition().y, space);
-            if (!anchored || (!space && h < 128)) {
+            double h = height(camera);
+            if (!Double.isFinite(h)) return;
+            if (!anchored || (!spacePass() && h < 180)) {
                 anchorX = camera.getPosition().x;
                 anchorZ = camera.getPosition().z;
                 anchored = true;
             }
-            float alpha = FlightMath.smoothRange(h, 128, 320);
-            if (!passDimension.equals(Level.OVERWORLD) && !passDimension.equals(ImmersivePortalsBackend.SPACE_DIMENSION)) return;
+            float alpha = FlightMath.smoothRange(h, 240, 640);
+            if (alpha <= 0.005f) return;
             try (RenderState ignored = new RenderState()) {
-                drawSky(event.getPoseStack(), atmosphere(h), event.getRenderTick() + event.getPartialTick());
-                if (alpha > 0.005f) OrbitalTerrainRenderer.render(event.getPoseStack(), camera.getPosition(), h, anchorX, anchorZ, alpha);
+                OrbitalTerrainRenderer.render(event.getPoseStack(), camera.getPosition(), h, anchorX, anchorZ, alpha);
             }
         }
     }
 
     private static final class RocketEffects extends DimensionSpecialEffects {
-        private final boolean overworld;
-
-        private RocketEffects(boolean overworld) {
-            super(128.0f, !overworld, SkyType.NORMAL, false, false);
-            this.overworld = overworld;
-        }
+        RocketEffects() { super(128, false, SkyType.NORMAL, false, false); }
 
         @Override
         public boolean renderSky(ClientLevel level, int ticks, float partialTick, PoseStack pose, Camera camera,
                                  Matrix4f projection, boolean foggy, Runnable setupFog) {
-            double h = virtualAltitude(camera.getPosition().y,
-                    level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
-            // Keep the native sun, moon and day/night sky. AFTER_SKY adds the fading space layer.
-            return !overworld;
-        }
-
-        @Override
-        public boolean renderClouds(ClientLevel level, int ticks, float partialTick, PoseStack pose,
-                                    double camX, double camY, double camZ, Matrix4f projection) {
-            double h = virtualAltitude(camY, level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
-            float opacity = 1.0f - atmosphere(h);
-            if (overworld && h < 160) return false;
+            if (fusedPass()) return true;
             try (RenderState ignored = new RenderState()) {
-            if (opacity > 0.005f)
-                drawClouds(pose, camX, camY, camZ, level.getCloudColor(partialTick), opacity, ticks + partialTick,
-                        level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION));
+                AtmosphereRenderer.render(pose, height(camera), partialTick);
             }
             return true;
         }
 
         @Override
-        public Vec3 getBrightnessDependentFogColor(Vec3 color, float sunHeight) {
-            return overworld ? color : new Vec3(color.x * 0.12, color.y * 0.15, color.z * 0.26);
+        public boolean renderClouds(ClientLevel level, int ticks, float partialTick, PoseStack pose,
+                                    double camX, double camY, double camZ, Matrix4f projection) {
+            return fusedPass() || spacePass() || camY > ClientFlightState.transitionAltitude() * 0.4;
         }
+
+        @Override
+        public boolean renderSnowAndRain(ClientLevel level, int ticks, float partialTick, LightTexture light,
+                                         double camX, double camY, double camZ) {
+            return spacePass() || camY > 256;
+        }
+
+        @Override
+        public boolean tickRain(ClientLevel level, int ticks, Camera camera) {
+            return spacePass() || camera.getPosition().y > 256;
+        }
+
+        @Override
+        public Vec3 getBrightnessDependentFogColor(Vec3 color, float sunHeight) { return color; }
 
         @Override
         public boolean isFoggyAt(int x, int z) { return false; }
     }
 
-    private static double virtualAltitude(double y, boolean space) {
-        double threshold = ClientFlightState.hasServerConfig() ? ClientFlightState.transitionAltitude() : 512.0;
-        return FlightMath.altitude(y, space, threshold);
-    }
-
-    private static float atmosphere(double y, boolean space) { return atmosphere(virtualAltitude(y, space)); }
-    private static float atmosphere(double altitude) { return FlightMath.smoothRange(altitude, 80.0, 520.0); }
-
-    private static void drawSky(PoseStack pose, float darkness, float time) {
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.disableCull();
-        RenderSystem.depthMask(false);
-        BufferBuilder b = Tesselator.getInstance().getBuilder();
-        b.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        Matrix4f m = pose.last().pose();
-        float radius = 100;
-        for (int lat = 0; lat < 12; lat++) for (int lon = 0; lon < 32; lon++) {
-            float p0 = (float) (-Math.PI / 2 + Math.PI * lat / 12), p1 = (float) (-Math.PI / 2 + Math.PI * (lat + 1) / 12);
-            float t0 = (float) (Math.PI * 2 * lon / 32), t1 = (float) (Math.PI * 2 * (lon + 1) / 32);
-            Vec3 a = sphere(radius, p0, t0), c = sphere(radius, p1, t0), d = sphere(radius, p1, t1), e = sphere(radius, p0, t1);
-            float c0 = 0.18f * (1 - darkness), c1 = 0.42f * (1 - darkness);
-            skyVertex(b, m, a, darkness, c0); skyVertex(b, m, c, darkness, c1); skyVertex(b, m, d, darkness, c1);
-            skyVertex(b, m, a, darkness, c0); skyVertex(b, m, d, darkness, c1); skyVertex(b, m, e, darkness, c0);
-        }
-        if (darkness > 0.03f) {
-            Random random = new Random(0x524f434b45544cL);
-            float alpha = Mth.clamp((darkness - 0.12f) / 0.88f, 0, 1);
-            for (int i = 0; i < 850; i++) {
-                float lat = (random.nextFloat() - 0.5f) * (float) Math.PI, lon = random.nextFloat() * (float) (Math.PI * 2);
-                Vec3 p = sphere(90, lat, lon), normal = p.normalize();
-                float size = i % 37 == 0 ? 0.14f : 0.065f;
-                float twinkle = 0.72f + 0.28f * (float) Math.sin(time * 0.035f + i * 2.71);
-                float a = alpha * twinkle;
-                Vec3 right = normal.cross(Math.abs(normal.y) > 0.9 ? new Vec3(1,0,0) : new Vec3(0,1,0)).normalize().scale(size);
-                Vec3 up = right.cross(normal).normalize().scale(size);
-                Vec3 v0=p.subtract(right).subtract(up), v1=p.add(right).subtract(up);
-                Vec3 v2=p.add(right).add(up), v3=p.subtract(right).add(up);
-                vertex(b,m,v0,1,0.97f,0.9f,a); vertex(b,m,v1,1,0.97f,0.9f,a); vertex(b,m,v2,1,0.97f,0.9f,a);
-                vertex(b,m,v0,1,0.97f,0.9f,a); vertex(b,m,v2,1,0.97f,0.9f,a); vertex(b,m,v3,1,0.97f,0.9f,a);
-            }
-        }
-        BufferUploader.drawWithShader(b.end());
-        RenderSystem.depthMask(true);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
-    }
-
-    private static void skyVertex(BufferBuilder b, Matrix4f m, Vec3 p, float darkness, float blue) {
-        vertex(b, m, p, 0.006f, 0.009f, 0.018f, darkness);
-    }
-
-    private static void drawClouds(PoseStack pose, double x, double y, double z, Vec3 color, float alpha, float time, boolean space) {
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        RenderSystem.enableBlend(); RenderSystem.defaultBlendFunc(); RenderSystem.disableCull();
-        BufferBuilder b = Tesselator.getInstance().getBuilder();
-        b.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        Matrix4f m = pose.last().pose();
-        double offset = space ? (ClientFlightState.hasServerConfig() ? ClientFlightState.transitionAltitude() : 512.0) - 64.0 : 0.0;
-        float cy = (float) (128.0 - offset-y), shift = (time * 0.025f) % 128, span = 768;
-        int grid = 12;
-        for (int ix=-grid/2; ix<grid/2; ix++) for (int iz=-grid/2; iz<grid/2; iz++) {
-            long seed = (long)(Math.floor(x/128)+ix)*341873128712L ^ (long)(Math.floor(z/128)+iz)*132897987541L;
-            Random random = new Random(seed);
-            if (random.nextFloat()<0.34f) continue;
-            float x0=(float)(Math.floor(x/128)*128-x)+ix*span/grid-shift;
-            float z0=(float)(Math.floor(z/128)*128-z)+iz*span/grid;
-            float w=span/grid*(0.45f+random.nextFloat()*0.55f), d=span/grid*(0.45f+random.nextFloat()*0.55f);
-            float a=alpha*(0.22f+random.nextFloat()*0.18f), r=(float)color.x, g=(float)color.y, bl=(float)color.z;
-            vertex(b,m,new Vec3(x0,cy,z0),r,g,bl,a); vertex(b,m,new Vec3(x0,cy,z0+d),r,g,bl,a);
-            vertex(b,m,new Vec3(x0+w,cy,z0+d),r,g,bl,a); vertex(b,m,new Vec3(x0+w,cy,z0),r,g,bl,a);
-        }
-        BufferUploader.drawWithShader(b.end());
-        RenderSystem.enableCull(); RenderSystem.disableBlend();
-    }
-
-    private static Vec3 sphere(float r, float latitude, float longitude) {
-        float c=(float)Math.cos(latitude);
-        return new Vec3(r*c*(float)Math.cos(longitude),r*(float)Math.sin(latitude),r*c*(float)Math.sin(longitude));
-    }
-
-    private static void vertex(BufferBuilder b, Matrix4f matrix, Vec3 p, float r, float g, float blue, float a) {
-        b.vertex(matrix,(float)p.x,(float)p.y,(float)p.z).color(r,g,blue,a).endVertex();
-    }
-
     private static final class RenderState implements AutoCloseable {
-        private final boolean depth=GL11.glIsEnabled(GL11.GL_DEPTH_TEST), blend=GL11.glIsEnabled(GL11.GL_BLEND);
-        private final boolean cull=GL11.glIsEnabled(GL11.GL_CULL_FACE), mask=GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
-        private final net.minecraft.client.renderer.ShaderInstance shader=RenderSystem.getShader();
+        private final boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST), blend = GL11.glIsEnabled(GL11.GL_BLEND);
+        private final boolean cull = GL11.glIsEnabled(GL11.GL_CULL_FACE), mask = GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
+        private final ShaderInstance shader = RenderSystem.getShader();
         private final int texture = RenderSystem.getShaderTexture(0);
+        private final int srcRgb = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB), dstRgb = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
+        private final int srcAlpha = GL11.glGetInteger(GL14.GL_BLEND_SRC_ALPHA), dstAlpha = GL11.glGetInteger(GL14.GL_BLEND_DST_ALPHA);
         @Override public void close() {
-            if(depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
-            if(blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
-            if(cull) RenderSystem.enableCull(); else RenderSystem.disableCull();
+            if (depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
+            if (blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
+            if (cull) RenderSystem.enableCull(); else RenderSystem.disableCull();
             RenderSystem.depthMask(mask);
-            RenderSystem.setShader(() -> shader);
+            RenderSystem.blendFuncSeparate(srcRgb, dstRgb, srcAlpha, dstAlpha);
+            RenderSystem.setShader(shader != null ? () -> shader : GameRenderer::getPositionColorShader);
             RenderSystem.setShaderTexture(0, texture);
         }
     }

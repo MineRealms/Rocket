@@ -1,0 +1,21 @@
+{
+  "vertex": "rocketmod:orbit_sky",
+  "fragment": "rocketmod:orbit_sky",
+  "attributes": ["Position"],
+  "samplers": [{"name": "Sampler0"}],
+  "uniforms": [
+    {"name": "ModelViewMat", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "ProjMat", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "SkyViewMat", "type": "matrix4x4", "count": 16, "values": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]},
+    {"name": "AirHeight", "type": "float", "count": 1, "values": [0.05]},
+    {"name": "SunDirection", "type": "float", "count": 3, "values": [0,1,0]},
+    {"name": "OrbitFade", "type": "float", "count": 1, "values": [0]},
+    {"name": "RainWeight", "type": "float", "count": 1, "values": [0]},
+    {"name": "MapWidth", "type": "float", "count": 1, "values": [1024]},
+    {"name": "MapTexel", "type": "float", "count": 1, "values": [0.00390625]},
+    {"name": "MapOffset", "type": "float", "count": 2, "values": [0,0]},
+    {"name": "NearAltitude", "type": "float", "count": 1, "values": [512]},
+    {"name": "TerrainBlend", "type": "float", "count": 1, "values": [0]},
+    {"name": "CloudOffset", "type": "float", "count": 2, "values": [0,0]}
+  ]
+}
