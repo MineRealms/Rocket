@@ -9,6 +9,16 @@ for(String value:new String[]{"Not a valid ID",":", "missing:not_registered"}) {
 if(com.example.examplemod.Config.items.stream().anyMatch(java.util.Objects::isNull))throw new IllegalStateException("Null configured item");
 if(com.example.examplemod.flight.FlightMath.smoothRange(Double.NaN,0,1)!=0
     || com.example.examplemod.flight.FlightMath.smoothRange(1,1,0)!=0)throw new IllegalStateException("Invalid visual range not safe");
+java.lang.reflect.Field landings=com.example.examplemod.compat.immptl.ImmersivePortalsBackend.class.getDeclaredField("RETURN_LANDINGS");
+landings.setAccessible(true);
+java.util.Map<java.util.UUID,Long> protections=(java.util.Map<java.util.UUID,Long>)landings.get(null);
+protections.put(p.getUUID(),(long)s.getTickCount()+1200L);
+net.minecraftforge.event.entity.living.LivingFallEvent zeroFall=new net.minecraftforge.event.entity.living.LivingFallEvent(p,0,1);
+com.example.examplemod.compat.immptl.ImmersivePortalsBackend.protectReturnLanding(zeroFall);
+if(!protections.containsKey(p.getUUID()))throw new IllegalStateException("Zero-distance fall consumed landing protection");
+net.minecraftforge.event.entity.living.LivingFallEvent landing=new net.minecraftforge.event.entity.living.LivingFallEvent(p,20,1);
+com.example.examplemod.compat.immptl.ImmersivePortalsBackend.protectReturnLanding(landing);
+if(protections.containsKey(p.getUUID()) || landing.getDamageMultiplier()!=0)throw new IllegalStateException("First landing was not protected");
 com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setNoGravity(false); p.getAbilities().flying=false; p.onUpdateAbilities(); p.setOnGround(false);
 p.setPos(p.getX(),com.example.examplemod.Config.flightTransitionAltitude-6,p.getZ());
@@ -31,7 +41,7 @@ try {
     com.example.examplemod.Config.loadRevision++;
     com.example.examplemod.transition.FlightTransferCoordinator.tick(s);
     if(revision.getLong(null)<=before)throw new IllegalStateException("Same-value config reload not synchronized");
-    return "PASS: invalid IDs/nulls, invalid render ranges, valid-session MAX_VALUE rejection, subsequent valid reply, same-value config reload";
+    return "PASS: invalid IDs/nulls, invalid render ranges, zero-distance/first-landing protection, valid-session MAX_VALUE rejection, subsequent valid reply, same-value config reload";
 } finally {
     com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
     p.stopFallFlying(); p.setNoGravity(false); p.getAbilities().flying=true; p.onUpdateAbilities();

@@ -32,9 +32,9 @@ def main():
     output = ROOT / ".local-cache/validation/p1-visual-frames.json"
     frames = []
     try:
-        for altitude in [80, 180, 320, 450, 511, 513, 900, 1500, 2000, 2384, 4000]:
+        for altitude in [120, 180, 320, 450, 511, 513, 900, 1500, 2000, 2384, 4000]:
             execute(VIEW.replace("@H@", str(altitude)).replace("@PITCH@", "90" if altitude >= 900 else "60"))
-            time.sleep(2)
+            time.sleep(4)
             metadata = execute((ROOT / "tools/probes/client_state.java").read_text(encoding="utf-8"))
             execute(CAPTURE.replace("@H@", str(altitude)))
             frames.append({"fixtureH": altitude, "client": metadata,

@@ -10,7 +10,7 @@ p.stopFallFlying(); com.example.examplemod.transition.FlightTransferCoordinator.
 p.setNoGravity(false); p.getAbilities().flying = true; p.onUpdateAbilities();
 net.minecraft.server.level.ServerLevel ow = s.overworld();
 if (!p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD))
-    qouteall.imm_ptl.core.api.PortalAPI.teleportEntity(p, ow, new net.minecraft.world.phys.Vec3(p.getX(), 422, p.getZ()));
+    qouteall.imm_ptl.core.api.PortalAPI.teleportEntity(p, ow, new net.minecraft.world.phys.Vec3(p.getX(), com.example.examplemod.Config.flightTransitionAltitude - 90, p.getZ()));
 p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO); p.hurtMarked = true;
 return "fixture reset, excluded from natural crossing count";
 """
@@ -38,6 +38,7 @@ def setup(ticks):
 
 def wait_case(name, ticks, target, report):
     setup(ticks)
+    threshold = float(execute(BASE + "return Double.toString(com.example.examplemod.Config.flightTransitionAltitude);"))
     began = time.monotonic()
     samples = []
     report[name] = {"result": "RUNNING", "samples": samples}
@@ -64,7 +65,7 @@ return "fresh vanilla firework after readiness wait exhausted the original boost
             report[name] = {"result": "PASS", "freshVanillaFirework": boosted, "samples": samples}
             print(f"PASS {name}: stable safety hold, Ready recovery, vanilla propulsion crossing", flush=True)
             return
-        if not state["clientArmed"] and state["y"] > 504:
+        if not state["clientArmed"] and state["y"] > threshold - 8:
             raise RuntimeError(f"Unsafe source position during wait: {state}")
         if target == "timeout" and time.monotonic() - began > 10 and held and state["leases"] == 0:
             if state["noGravity"]:
@@ -89,18 +90,22 @@ String status = com.example.examplemod.transition.FlightTransferCoordinator.stat
 java.util.UUID id = java.util.UUID.fromString(status.split("id=")[1].split(";")[0]);
 java.lang.reflect.Field rev = com.example.examplemod.transition.FlightTransferCoordinator.class.getDeclaredField("revision");
 rev.setAccessible(true); long revision = rev.getLong(null);
+java.lang.reflect.Field sessions = com.example.examplemod.transition.FlightTransferCoordinator.class.getDeclaredField("SESSIONS");
+sessions.setAccessible(true); Object session = ((java.util.Map<?,?>) sessions.get(null)).get(p.getUUID());
+java.lang.reflect.Field last = session.getClass().getDeclaredField("lastReplySequence"); last.setAccessible(true);
+long next = last.getLong(session) + 1;
 com.example.examplemod.network.FlightNetwork.ClientReply first = new com.example.examplemod.network.FlightNetwork.ClientReply(
-    id, 1000000, revision, false, false, "first ordered reply");
+    id, next, revision, false, false, "first ordered reply");
 com.example.examplemod.transition.FlightTransferCoordinator.onReply(p, first);
 com.example.examplemod.transition.FlightTransferCoordinator.onReply(p, new com.example.examplemod.network.FlightNetwork.ClientReply(
-    id, 1000000, revision, true, false, "duplicate must be rejected"));
+    id, next, revision, true, false, "duplicate must be rejected"));
 if (!com.example.examplemod.transition.FlightTransferCoordinator.status(p).contains("first ordered reply"))
     throw new IllegalStateException("Duplicate sequence changed the session");
 com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, 1, 0));
 com.example.examplemod.transition.FlightTransferCoordinator.tick(s);
 com.example.examplemod.transition.FlightTransferCoordinator.onReply(p, new com.example.examplemod.network.FlightNetwork.ClientReply(
-    id, 1000001, revision, true, true, "old session must be rejected"));
+    id, next + 1, revision, true, true, "old session must be rejected"));
 if (com.example.examplemod.transition.FlightTransferCoordinator.canCross(p, com.example.examplemod.compat.immptl.ImmersivePortalsBackend.SPACE_DIMENSION))
     throw new IllegalStateException("Old session opened the gate");
 return "PASS: duplicate sequence and old session rejected by real reply handler";

@@ -31,6 +31,8 @@ START = BASE + """
 p.stopFallFlying();
 com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setNoGravity(false);
+for (net.minecraft.world.entity.projectile.FireworkRocketEntity old : p.serverLevel().getEntitiesOfClass(
+        net.minecraft.world.entity.projectile.FireworkRocketEntity.class, p.getBoundingBox().inflate(64))) old.discard();
 boolean up = p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD);
 double boundary = up ? com.example.examplemod.Config.flightTransitionAltitude : 64.0;
 p.teleportTo(p.serverLevel(), @X@, boundary + (up ? -90 : 90), @Z@, 0, up ? -85 : 85);
@@ -44,8 +46,11 @@ c.execute(() -> {
     final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> source = c.player.level().dimension();
     java.util.function.Consumer<net.minecraftforge.event.TickEvent.ClientTickEvent> driver = event -> {
         if (event.phase != net.minecraftforge.event.TickEvent.Phase.END || c.player == null
-                || !c.player.level().dimension().equals(source) || !c.player.isFallFlying()) return;
-        if (com.example.examplemod.client.flight.ClientFlightState.isArmed()) {
+                || !c.player.isFallFlying()) return;
+        // Keep the controlled speed just after crossing, until the next fixture replaces this
+        // driver. Otherwise bridge compilation can outlast the natural ascent's remaining lift.
+        if (!c.player.level().dimension().equals(source)
+                || com.example.examplemod.client.flight.ClientFlightState.isArmed()) {
             c.player.setDeltaMovement(new net.minecraft.world.phys.Vec3(0, up ? @SPEED@ : -@SPEED@, 0));
         }
     };
@@ -104,6 +109,10 @@ def main():
         raise RuntimeError("Start the suite in the Overworld of a disposable test world")
     try:
         for leg in range(args.rounds * 2):
+            expected_source = "minecraft:overworld" if leg % 2 == 0 else "rocketmod:space"
+            before = execute(STATE)
+            if before["dimension"] != expected_source:
+                raise RuntimeError(f"Wrong source for leg {leg}: {before}")
             speed = (0.75, 1.5, 3.0)[(leg // 2) % 3]
             fps = 10 if (leg // 2) % 5 == 4 else 120
             # Four new observation regions exercise cold target chunks during the run.
@@ -113,6 +122,8 @@ def main():
             time.sleep(1)
             execute(ARM)
             source = execute(STATE)
+            if source["dimension"] != expected_source:
+                raise RuntimeError(f"Crossing occurred before sampling source for leg {leg}: {source}")
             target = "rocketmod:space" if leg % 2 == 0 else "minecraft:overworld"
             began = time.monotonic()
             while time.monotonic() - began < 35:

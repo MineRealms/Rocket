@@ -35,6 +35,8 @@ int y = s.overworld().getHeight(net.minecraft.world.level.levelgen.Heightmap.Typ
     spawn.getX(), spawn.getZ());
 qouteall.imm_ptl.core.api.PortalAPI.teleportEntity(p, s.overworld(),
     new net.minecraft.world.phys.Vec3(spawn.getX() + 0.5, y + 5, spawn.getZ() + 0.5));
+p.connection.teleport(spawn.getX() + 0.5, y + 5, spawn.getZ() + 0.5, 0, -10);
+s.overworld().setDayTime(6000);
 p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
 p.fallDistance = 0; p.setHealth(p.getMaxHealth());
 p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(p));
@@ -48,10 +50,17 @@ com.example.examplemod.Config.debugElytraSpaceFlight = true;
 com.example.examplemod.compat.immptl.ImmersivePortalsBackend.reconcile(s);
 net.minecraft.client.Minecraft c = net.minecraft.client.Minecraft.getInstance();
 c.execute(() -> {
-    for (String key : new String[]{"rocketmod.test.driver", "rocketmod.test.trace", "rocketmod.test.motion"}) {
+    for (String key : new String[]{"rocketmod.test.driver", "rocketmod.test.trace", "rocketmod.test.motion.camera",
+            "rocketmod.test.motion.capture"}) {
         Object listener = System.getProperties().remove(key);
         if (listener != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(listener);
     }
+    Object writer = System.getProperties().remove("rocketmod.test.trace.writer");
+    if (writer instanceof java.io.Closeable) {
+        try { ((java.io.Closeable) writer).close(); }
+        catch (java.io.IOException error) { throw new RuntimeException(error); }
+    }
+    System.getProperties().remove("rocketmod.test.motion.frames");
     com.example.examplemod.client.flight.ClientFlightState.setDebugReadyDelayTicks(0);
     c.options.framerateLimit().set(120); c.options.hideGui = false; c.setScreen(null);
 });
@@ -61,11 +70,15 @@ return "playtest ready: Overworld, creative, Elytra, 64 rockets, boundary Y="
     if args.show:
         print(execute("""
 net.minecraft.client.Minecraft c = net.minecraft.client.Minecraft.getInstance();
+java.util.concurrent.CompletableFuture<String> visible = new java.util.concurrent.CompletableFuture<>();
 c.execute(() -> {
+    org.lwjgl.glfw.GLFW.glfwSetWindowSize(c.getWindow().getWindow(), 1280, 720);
     org.lwjgl.glfw.GLFW.glfwShowWindow(c.getWindow().getWindow());
     org.lwjgl.glfw.GLFW.glfwFocusWindow(c.getWindow().getWindow());
+    visible.complete("Minecraft window visible=" + (org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(
+        c.getWindow().getWindow(), org.lwjgl.glfw.GLFW.GLFW_VISIBLE) == org.lwjgl.glfw.GLFW.GLFW_TRUE));
 });
-return "Minecraft window shown";
+return visible.get(10, java.util.concurrent.TimeUnit.SECONDS);
 """))
 
 

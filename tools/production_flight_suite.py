@@ -32,8 +32,32 @@ net.minecraft.world.item.ItemStack elytra = new net.minecraft.world.item.ItemSta
 elytra.getOrCreateTag().putBoolean("Unbreakable", true);
 p.setItemSlot(net.minecraft.world.entity.EquipmentSlot.CHEST, elytra);
 boolean up = p.level().dimension().equals(net.minecraft.world.level.Level.OVERWORLD);
+net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> source = p.level().dimension();
+java.util.UUID playerId = p.getUUID();
+Object previous = System.getProperties().remove("rocketmod.production.arrivalListener");
+if (previous != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(previous);
+System.getProperties().remove("rocketmod.production.arrival");
+java.util.function.Consumer<net.minecraftforge.event.entity.player.PlayerEvent.PlayerChangedDimensionEvent> arrival = event -> {
+    if (!event.getEntity().m_20148_().equals(playerId) || !event.getFrom().equals(source)
+            || event.getTo().equals(source)) return;
+    com.google.gson.JsonObject j = new com.google.gson.JsonObject();
+    j.addProperty("dimension", p.level().dimension().location().toString());
+    j.addProperty("uuid", p.getUUID().toString());
+    j.addProperty("h", com.example.examplemod.transition.FlightTransferCoordinator.altitude(p));
+    j.addProperty("vy", p.getDeltaMovement().y); j.addProperty("gliding", p.isFallFlying());
+    j.addProperty("latency", p.latency);
+    System.getProperties().put("rocketmod.production.arrival", j.toString());
+    // Hold only after the natural crossing is recorded; bridge compilation can otherwise
+    // outlast the boost and allow an unobserved second crossing before the next leg.
+    p.stopFallFlying(); p.getAbilities().flying = true; p.onUpdateAbilities();
+    p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO); p.hurtMarked = true;
+    p.connection.m_9829_(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(p));
+};
+net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(net.minecraftforge.eventbus.api.EventPriority.LOWEST,
+    false, net.minecraftforge.event.entity.player.PlayerEvent.PlayerChangedDimensionEvent.class, arrival);
+System.getProperties().put("rocketmod.production.arrivalListener", arrival);
 double boundary = up ? com.example.examplemod.Config.flightTransitionAltitude : 64;
-p.teleportTo(p.serverLevel(), @X@, boundary + (up ? -40 : 40), 4096, 0, up ? -85 : 85);
+p.connection.m_9774_(@X@.0, boundary + (up ? -40 : 40), 4096.0, 0.0F, up ? -85.0F : 85.0F);
 p.getAbilities().flying = true; p.onUpdateAbilities();
 p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO); p.hurtMarked = true;
 return "same-dimension setup; no dimension API";
@@ -70,6 +94,10 @@ def main():
                 "c.execute(() -> { c.options.pauseOnLostFocus = false; c.setScreen(null); "
                 "c.options.framerateLimit().set(60); }); return \"client ready\";", client=True)
         for leg in range(4):
+            expected_source = "minecraft:overworld" if leg % 2 == 0 else "rocketmod:space"
+            source = execute(STATE)
+            if source["dimension"] != expected_source:
+                raise RuntimeError(f"Release leg {leg} started in {source['dimension']}, expected {expected_source}")
             execute(SETUP.replace("@X@", str(4096 + (leg // 2) * 512)))
             time.sleep(1.5)
             execute(BOOST)
@@ -82,10 +110,16 @@ def main():
                 if state["uuid"] != origin["uuid"] or state["portals"] != 2 or state["players"] != 1:
                     raise RuntimeError("Identity, player count, or portal count changed")
                 if state["dimension"] == target:
-                    if not state["gliding"]:
+                    arrival = execute('Object arrival = System.getProperties().get("rocketmod.production.arrival"); '
+                                      'if (arrival == null) throw new IllegalStateException("Missing natural arrival event"); '
+                                      'return arrival.toString();')
+                    if arrival["dimension"] != target or arrival["uuid"] != origin["uuid"]:
+                        raise RuntimeError("Natural arrival event does not match the target player")
+                    if not arrival["gliding"]:
                         raise RuntimeError("Elytra state lost across release-jar crossing")
-                    report["legs"].append({"leg": leg, "arrival": state})
-                    print(f"PASS release crossing {leg+1}/4: {target}, RTT={state['latency']}ms", flush=True)
+                    report["legs"].append({"leg": leg, "arrival": arrival, "postCrossingFixtureHold": True,
+                                           "heldState": state})
+                    print(f"PASS release crossing {leg+1}/4: {target}, RTT={arrival['latency']}ms", flush=True)
                     break
                 if time.monotonic() - began > 3 and state["status"].startswith("READY") and not boosted:
                     execute(BOOST)
@@ -101,6 +135,9 @@ def main():
         raise
     finally:
         execute(BASE + """
+Object listener = System.getProperties().remove("rocketmod.production.arrivalListener");
+if (listener != null) net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(listener);
+System.getProperties().remove("rocketmod.production.arrival");
 p.stopFallFlying(); com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setNoGravity(false); p.getAbilities().flying = true; p.onUpdateAbilities();
 p.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO); p.hurtMarked = true;
