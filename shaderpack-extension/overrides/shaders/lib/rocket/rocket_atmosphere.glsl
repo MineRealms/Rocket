@@ -10,13 +10,34 @@ uniform vec3 rocketCameraRight;
 uniform sampler2D rocketTerrain;
 uniform sampler2D rocketWorldTerrain;
 
-vec4 rocketWorldSample(vec2 uv) {
-    vec2 pixel = clamp(uv * 128.0 - 0.5, vec2(0.0), vec2(127.0));
+vec4 rocketSurfaceSample(sampler2D terrainMap, vec2 uv, int size) {
+    vec2 pixel = clamp(uv * float(size) - 0.5, vec2(0.0), vec2(float(size - 1)));
     ivec2 p = ivec2(floor(pixel));
-    ivec2 q = min(p + 1, ivec2(127));
+    ivec2 q = min(p + 1, ivec2(size - 1));
     vec2 f = fract(pixel);
-    return mix(mix(texelFetch(rocketWorldTerrain, p, 0), texelFetch(rocketWorldTerrain, ivec2(q.x, p.y), 0), f.x),
-               mix(texelFetch(rocketWorldTerrain, ivec2(p.x, q.y), 0), texelFetch(rocketWorldTerrain, q, 0), f.x), f.y);
+    vec4 a = texelFetch(terrainMap, p, 0);
+    vec4 b = texelFetch(terrainMap, ivec2(q.x, p.y), 0);
+    vec4 c = texelFetch(terrainMap, ivec2(p.x, q.y), 0);
+    vec4 d = texelFetch(terrainMap, q, 0);
+    vec4 weights = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y),
+                        (1.0 - f.x) * f.y, f.x * f.y)
+                 * step(vec4(0.001), vec4(a.a, b.a, c.a, d.a));
+    float coverage = dot(weights, vec4(1.0));
+    vec3 color = (a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w)
+               / max(coverage, 0.0001);
+    return vec4(color, coverage);
+}
+
+float rocketLocalCoverage(vec2 uv) {
+    float coverage = 0.0;
+    for (int i = 0; i < 12; i++) {
+        float angle = float(i) * 2.39996323;
+        float radius = 20.0 * sqrt((float(i) + 0.5) / 12.0);
+        vec2 sampleUV = uv + vec2(cos(angle), sin(angle)) * radius / 256.0;
+        ivec2 pixel = ivec2(clamp(sampleUV * 256.0, vec2(0.0), vec2(255.0)));
+        coverage += step(0.001, texelFetch(rocketTerrain, pixel, 0).a);
+    }
+    return smoothstep(0.25, 1.0, coverage / 12.0);
 }
 
 vec3 rocketViewRay(vec2 uv) {
@@ -132,7 +153,8 @@ vec3 rocketAtmosphere(vec3 original, vec3 ray, vec3 sun) {
     float celestial = smoothstep(0.997, 0.9995, abs(dot(ray, sun)));
     float orbitalLight = smoothstep(1240.0, 1400.0, height);
     sky = mix(sky, max(sky, original), celestial * (1.0 - orbitalLight));
-    sky += vec3(4.0, 3.8, 3.3) * smoothstep(cos(0.006), cos(0.0038), dot(ray, sun)) * orbitalLight;
+    if (!hitsGround)
+        sky += vec3(4.0, 3.8, 3.3) * smoothstep(cos(0.006), cos(0.0038), dot(ray, sun)) * orbitalLight;
     uint starHash = rocketStarHash(ivec3(floor(ray * 650.0)));
     float star = float(starHash % 1100u == 0u && !hitsGround);
     float starVisibility = exp(-dot(sky, vec3(0.2126, 0.7152, 0.0722)) * 18.0);
@@ -140,34 +162,25 @@ vec3 rocketAtmosphere(vec3 original, vec3 ray, vec3 sun) {
     sky += star * starColor * 0.6 * ascent * starVisibility * transmission;
 
     if (hitsGround) {
-        float distanceToGround = groundShell.x;
-        vec2 local = rocketMapInfo.xy + ray.xz * distanceToGround;
-        vec2 wideLocal = rocketWorldMapInfo.xy + ray.xz * distanceToGround;
+        // Both resolutions share this hit. Terrain height never moves either map.
+        float worldHeight = max(min(height, rocketTransitionAltitude) - 64.0, 1.0);
+        vec2 surfaceOffset = ray.xz * groundShell.x * worldHeight / max(sceneHeight, 0.01);
+        vec2 local = rocketMapInfo.xy + surfaceOffset;
+        vec2 wideLocal = rocketWorldMapInfo.xy + surfaceOffset;
         vec2 wideUV = wideLocal / max(rocketWorldMapInfo.z, 1.0) + 0.5 + 0.5 / 128.0;
         float wideEdge = max(abs(wideUV.x - 0.5), abs(wideUV.y - 0.5));
-        vec4 wideTerrain = rocketWorldSample(wideUV);
-        float wideKnown = step(0.001, wideTerrain.a) * (1.0 - smoothstep(0.46, 0.5, wideEdge));
+        vec4 wideTerrain = rocketSurfaceSample(rocketWorldTerrain, wideUV, 128);
+        float wideKnown = wideTerrain.a * (1.0 - smoothstep(0.46, 0.5, wideEdge));
         vec3 surfaceColor = mix(vec3(0.14, 0.17, 0.19), wideTerrain.rgb, wideKnown);
-        float surfaceHeight = mix(64.0, (wideTerrain.a * 255.0 - 1.0) * 384.0 / 254.0 - 64.0, wideKnown);
-        vec2 uv = local / max(rocketMapInfo.z, 1.0) + 0.5 + 0.5 / 256.0;
-        float edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5));
-        vec4 terrain = texture2D(rocketTerrain, clamp(uv, vec2(0.002), vec2(0.998)));
-        float known = step(0.001, terrain.a) * (1.0 - smoothstep(0.28, 0.5, edge));
-        // Reproject once using the sampled column height instead of a flat sea plane.
-        surfaceHeight = mix(surfaceHeight, (terrain.a * 255.0 - 1.0) * 384.0 / 254.0 - 64.0, known);
-        vec2 heightUV = (rocketMapInfo.xy + ray.xz * ((surfaceHeight - height) / ray.y))
-                      / max(rocketMapInfo.z, 1.0) + 0.5 + 0.5 / 256.0;
-        vec4 elevated = texture2D(rocketTerrain, clamp(heightUV, vec2(0.002), vec2(0.998)));
-        terrain.rgb = mix(terrain.rgb, elevated.rgb, step(0.001, elevated.a));
-        surfaceColor = mix(surfaceColor, terrain.rgb, known);
-        vec2 texel = vec2(1.0 / 128.0, 0.0);
-        float leftHeight = rocketWorldSample(wideUV - texel.xy).a;
-        float rightHeight = rocketWorldSample(wideUV + texel.xy).a;
-        float nearHeight = rocketWorldSample(wideUV - texel.yx).a;
-        float farHeight = rocketWorldSample(wideUV + texel.yx).a;
-        vec2 slope = vec2(rightHeight - leftHeight, farHeight - nearHeight) * 384.0 / 512.0;
-        vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
-        vec3 ground = pow(surfaceColor, vec3(2.2)) * (0.025 + 1.25 * max(dot(normal, sun), 0.0));
+        float detailBlend = 1.0 - smoothstep(900.0, 1400.0, height);
+        if (detailBlend > 0.0) {
+            vec2 uv = local / max(rocketMapInfo.z, 1.0) + 0.5 + 0.5 / 256.0;
+            float edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5));
+            vec4 terrain = rocketSurfaceSample(rocketTerrain, uv, 256);
+            float known = terrain.a * (1.0 - smoothstep(0.28, 0.5, edge)) * rocketLocalCoverage(uv);
+            surfaceColor = mix(surfaceColor, terrain.rgb, known * detailBlend);
+        }
+        vec3 ground = pow(surfaceColor, vec3(2.2)) * (0.025 + 1.25 * max(sun.y, 0.0));
         ground = ground * transmission + sky;
         float mapBlend = smoothstep(240.0, 640.0, height);
         sky = mix(sky, ground, mapBlend);
