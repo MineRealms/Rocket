@@ -7,6 +7,12 @@ for(String value:new String[]{"Not a valid ID",":", "missing:not_registered"}) {
     if((boolean)validate.invoke(null,value))throw new IllegalStateException("Invalid configured item accepted: "+value);
 }
 if(com.example.examplemod.Config.items.stream().anyMatch(java.util.Objects::isNull))throw new IllegalStateException("Null configured item");
+java.lang.reflect.Method budget=com.example.examplemod.network.FlightNetwork.class.getDeclaredMethod("allowReply",net.minecraft.network.Connection.class);
+budget.setAccessible(true);
+net.minecraft.network.Connection testConnection=new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND);
+int allowed=0;
+for(int i=0;i<100;i++)if((boolean)budget.invoke(null,testConnection))allowed++;
+if(allowed!=16)throw new IllegalStateException("Unexpected ingress burst allowance: "+allowed);
 if(com.example.examplemod.flight.FlightMath.smoothRange(Double.NaN,0,1)!=0
     || com.example.examplemod.flight.FlightMath.smoothRange(1,1,0)!=0)throw new IllegalStateException("Invalid visual range not safe");
 java.lang.reflect.Field landings=com.example.examplemod.compat.immptl.ImmersivePortalsBackend.class.getDeclaredField("RETURN_LANDINGS");
@@ -37,11 +43,15 @@ try {
     if(sequence.getLong(session)!=0)throw new IllegalStateException("Overflow reply poisoned session");
     com.example.examplemod.transition.FlightTransferCoordinator.onReply(p,new com.example.examplemod.network.FlightNetwork.ClientReply(sessionId,1,rev,false,false,"valid after overflow"));
     if(sequence.getLong(session)!=1)throw new IllegalStateException("Valid reply rejected after overflow");
+    com.example.examplemod.transition.FlightTransferCoordinator.onReply(p,new com.example.examplemod.network.FlightNetwork.ClientReply(sessionId,3,rev,false,false,"after one network-limited reply"));
+    if(sequence.getLong(session)!=3)throw new IllegalStateException("Reply sequence gap stalled the session");
+    com.example.examplemod.transition.FlightTransferCoordinator.onReply(p,new com.example.examplemod.network.FlightNetwork.ClientReply(sessionId,2,rev,true,false,"stale reply"));
+    if(sequence.getLong(session)!=3)throw new IllegalStateException("Out-of-order reply rolled sequence back");
     long before=rev;
     com.example.examplemod.Config.loadRevision++;
     com.example.examplemod.transition.FlightTransferCoordinator.tick(s);
     if(revision.getLong(null)<=before)throw new IllegalStateException("Same-value config reload not synchronized");
-    return "PASS: invalid IDs/nulls, invalid render ranges, zero-distance/first-landing protection, valid-session MAX_VALUE rejection, subsequent valid reply, same-value config reload";
+    return "PASS: invalid IDs/nulls, invalid render ranges, zero-distance/first-landing protection, bounded reply sequence, skipped-rate-limited sequence, stale reply rejection, same-value config reload";
 } finally {
     com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
     p.stopFallFlying(); p.setNoGravity(false); p.getAbilities().flying=true; p.onUpdateAbilities();

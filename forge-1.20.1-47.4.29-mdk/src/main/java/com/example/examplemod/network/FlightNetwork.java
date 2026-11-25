@@ -3,6 +3,7 @@ package com.example.examplemod.network;
 import com.example.examplemod.ExampleMod;
 import com.example.examplemod.transition.FlightTransferCoordinator;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.Connection;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -15,6 +16,9 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 import java.util.UUID;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
@@ -24,6 +28,10 @@ public final class FlightNetwork {
             ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "flight"), () -> VERSION, VERSION::equals, VERSION::equals);
     public static final UUID NONE = new UUID(0, 0);
     public static final long MAX_REPLY_SEQUENCE = 512;
+    private static final int REPLY_BURST = 16;
+    private static final double REPLIES_PER_SECOND = 8.0;
+    private static final Map<Connection, ReplyBudget> REPLY_BUDGETS =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static volatile Consumer<ServerMessage> clientReceiver = message -> {};
     private static volatile BiPredicate<Player, ResourceKey<Level>> clientGate = (player, destination) -> false;
 
@@ -35,9 +43,15 @@ public final class FlightNetwork {
                 .consumerMainThread((message, context) -> clientReceiver.accept(message)).add();
         CHANNEL.messageBuilder(ClientReply.class, 1, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(ClientReply::encode).decoder(ClientReply::decode)
-                .consumerMainThread((message, context) -> {
-                    ServerPlayer sender = context.get().getSender();
-                    if (sender != null) FlightTransferCoordinator.onReply(sender, message);
+                .consumerNetworkThread((message, context) -> {
+                    var networkContext = context.get();
+                    if (networkContext.getSender() != null && allowReply(networkContext.getNetworkManager())) {
+                        networkContext.enqueueWork(() -> {
+                            ServerPlayer sender = networkContext.getSender();
+                            if (sender != null) FlightTransferCoordinator.onReply(sender, message);
+                        });
+                    }
+                    networkContext.setPacketHandled(true);
                 }).add();
     }
 
@@ -56,6 +70,26 @@ public final class FlightNetwork {
     }
 
     public static void reply(ClientReply message) { CHANNEL.sendToServer(message); }
+
+    private static boolean allowReply(Connection connection) {
+        long now = System.nanoTime();
+        synchronized (REPLY_BUDGETS) {
+            ReplyBudget budget = REPLY_BUDGETS.computeIfAbsent(connection, ignored -> new ReplyBudget(now));
+            budget.tokens = Math.min(REPLY_BURST,
+                    budget.tokens + (now - budget.lastNanos) * REPLIES_PER_SECOND / 1_000_000_000.0);
+            budget.lastNanos = now;
+            if (budget.tokens < 1.0) return false;
+            budget.tokens -= 1.0;
+            return true;
+        }
+    }
+
+    private static final class ReplyBudget {
+        double tokens = REPLY_BURST;
+        long lastNanos;
+
+        ReplyBudget(long now) { lastNanos = now; }
+    }
 
     public enum Kind { CONFIG, PREPARE, ARMED, CONFIRM, ABORT, SNAPSHOT }
 

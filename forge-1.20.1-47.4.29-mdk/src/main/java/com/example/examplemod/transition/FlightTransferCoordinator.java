@@ -140,7 +140,7 @@ public final class FlightTransferCoordinator {
         Session session = SESSIONS.get(player.getUUID());
         if (session == null || !session.id.equals(reply.id()) || reply.revision() != revision
                 || reply.sequence() < 1 || reply.sequence() > FlightNetwork.MAX_REPLY_SEQUENCE
-                || reply.sequence() != session.lastReplySequence + 1 || !enabled) return;
+                || reply.sequence() <= session.lastReplySequence || !enabled) return;
         long now = player.getServer().getTickCount();
         if (session.replyTick != now) {
             session.replyTick = now;
