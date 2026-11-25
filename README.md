@@ -2,7 +2,7 @@
 
 Forge 1.20.1 火箭升空与太空维度项目。
 
-当前为鞘翅飞行验证版：使用真实 IP 水平门户、目标预热与 Ready 握手往返太空。近地轨道显示近乎平直的地形颜色代理，高轨道使用像素贴图方块地球。下降返回不要求鞘翅，另有防虚空兜底。火箭实体待后续实现。
+当前为鞘翅飞行验证版：使用真实 IP 水平门户、目标预热与 Ready 握手往返太空。轨道地形从主世界真实 FULL 区块采样、持久缓存为低分辨率地图，Oculus shader 将其投影到大范围曲面并计算大气。Y=1400 至 Space 任意高度保持同一近地轨道视图，不启用同步轨道。首次生成需要时间；当前是稀疏地表 LOD，不是逐方块完整几何。下降返回不要求鞘翅，另有防虚空兜底。火箭实体待后续实现。
 
 ## 技术决策
 
@@ -21,8 +21,9 @@ Forge 1.20.1 火箭升空与太空维度项目。
 | [IP 核心技术研究](docs/02-immersive-portals-research.md) | 固定版本源码、可复用机制、限制与实验 |
 | [开发路线与验收](docs/03-development-roadmap.md) | 阶段依赖、首批任务、测试与停止条件 |
 | [大气与门户矩形问题](docs/06-atmosphere-research.md) | 固定 IP 源码根因、融合视图、背景绘制策略 |
-| [真实升空视觉参考](docs/07-ascent-visual-reference.md) | NASA / ESA 依据、近轨道与同步轨道映射 |
+| [ISS 近地轨道视觉参考](docs/07-ascent-visual-reference.md) | NASA 轨道影像与 ISS 风格近地视野 |
 | [审查逐项核实](docs/08-review-findings.md) | 已确认问题、修复及不成立的推断 |
+| [Voxy 与行星尺度 LOD](docs/09-voxy-and-planet-lod.md) | Forge 1.20.1 兼容结论、真实世界缓存和后续集成边界 |
 
 ## 工程入口
 

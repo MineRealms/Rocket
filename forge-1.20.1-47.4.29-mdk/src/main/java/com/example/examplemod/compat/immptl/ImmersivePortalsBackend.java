@@ -175,6 +175,9 @@ public final class ImmersivePortalsBackend {
         portal.teleportChangesScale = false;
         // Share the outer sky/depth; IP otherwise replaces a view-distance-sized rectangle of sky.
         portal.fuseView = true;
+        // The atmosphere is one continuous full-screen view. Rendering the remote world's sky
+        // here reintroduces a rectangular sky/cloud window, especially with Oculus pipelines.
+        portal.setIsVisible(false);
         portal.setInteractable(false);
         // Global portals are serialized/synced by IP, independently of normal entity chunk tracking.
         PortalAPI.addGlobalPortal(source, portal);

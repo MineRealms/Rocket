@@ -57,7 +57,21 @@ public final class ShaderpackBridge {
                 var clock = AtmosphereRenderer.visualLevel();
                 return clock == null ? 0 : clock.getMoonPhase();
             });
+            integer.invoke(holder, perFrame, "rocketSpacePass", (IntSupplier) () -> {
+                Minecraft client = Minecraft.getInstance();
+                return client.level != null && (client.level.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)
+                        || client.level.dimension().equals(ImmersivePortalsBackend.SPACE_DIMENSION)) ? 1 : 0;
+            });
             vector.invoke(holder, perFrame, "rocketMapInfo", (Supplier<Vector3f>) OrbitalTerrainRenderer::mapInfo);
+            vector.invoke(holder, perFrame, "rocketMapOrigin", (Supplier<Vector3f>) OrbitalTerrainRenderer::mapOrigin);
+            vector.invoke(holder, perFrame, "rocketWorldMapInfo", (Supplier<Vector3f>) WorldTerrainAtlas::info);
+            vector.invoke(holder, perFrame, "rocketWorldMapOrigin", (Supplier<Vector3f>) WorldTerrainAtlas::origin);
+            vector.invoke(holder, perFrame, "rocketCameraForward", (Supplier<Vector3f>) () ->
+                    new Vector3f(Minecraft.getInstance().gameRenderer.getMainCamera().getLookVector()));
+            vector.invoke(holder, perFrame, "rocketCameraUp", (Supplier<Vector3f>) () ->
+                    new Vector3f(Minecraft.getInstance().gameRenderer.getMainCamera().getUpVector()));
+            vector.invoke(holder, perFrame, "rocketCameraRight", (Supplier<Vector3f>) () ->
+                    new Vector3f(Minecraft.getInstance().gameRenderer.getMainCamera().getLeftVector()).negate());
             uniformRegistrations++;
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Oculus uniform API does not match the installed ROCKET profile", error);
@@ -69,12 +83,7 @@ public final class ShaderpackBridge {
             Class<?> type = Class.forName("net.irisshaders.iris.gl.sampler.SamplerHolder");
             Method dynamic = type.getMethod("addDynamicSampler", IntSupplier.class, String[].class);
             dynamic.invoke(holder, (IntSupplier) OrbitalTerrainRenderer::terrainTexture, new String[]{"rocketTerrain"});
-            String[] names = {"Top", "Bottom", "North", "South", "East", "West"};
-            for (int face = 0; face < names.length; face++) {
-                final int index = face;
-                dynamic.invoke(holder, (IntSupplier) () -> OrbitalTerrainRenderer.earthTexture(index),
-                        new String[]{"rocketEarth" + names[face]});
-            }
+            dynamic.invoke(holder, (IntSupplier) WorldTerrainAtlas::textureId, new String[]{"rocketWorldTerrain"});
         } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Oculus sampler API does not match the installed ROCKET profile", error);
         }

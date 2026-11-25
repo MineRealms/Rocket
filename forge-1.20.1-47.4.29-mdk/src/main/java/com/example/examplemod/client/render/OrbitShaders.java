@@ -24,6 +24,7 @@ public final class OrbitShaders {
     @SubscribeEvent
     public static void register(RegisterShadersEvent event) throws IOException {
         OrbitalTerrainRenderer.invalidateTerrain();
+        WorldTerrainAtlas.invalidate();
         event.registerShader(new ShaderInstance(event.getResourceProvider(),
                 ResourceLocation.fromNamespaceAndPath(ExampleMod.MODID, "orbit_surface"), DefaultVertexFormat.POSITION_TEX_COLOR),
                 shader -> surface = shader);

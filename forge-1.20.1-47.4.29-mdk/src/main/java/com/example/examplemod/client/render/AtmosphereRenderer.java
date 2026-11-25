@@ -32,10 +32,16 @@ public final class AtmosphereRenderer {
     }
 
     public static Vector3f sunDirection(float partialTick) {
+        return sunDirection(partialTick, ClientFlightState.altitude(partialTick));
+    }
+
+    public static Vector3f sunDirection(float partialTick, double height) {
         ClientLevel level = visualLevel();
         // Space has a fixed midnight; retain the last Overworld angle if its world is unavailable.
         if (level != null) lastSunAngle = level.getSunAngle(partialTick);
-        return new Vector3f(-Mth.sin(lastSunAngle), Mth.cos(lastSunAngle), 0);
+        Vector3f daylight = new Vector3f(-0.22f, 0.88f, 0.42f).normalize();
+        return new Vector3f(-Mth.sin(lastSunAngle), Mth.cos(lastSunAngle), 0)
+                .lerp(daylight, FlightMath.smoothRange(height, 1240, 1400)).normalize();
     }
 
     public static float airHeight(double height) {
@@ -53,7 +59,7 @@ public final class AtmosphereRenderer {
         ShaderInstance shader = OrbitShaders.sky();
         Minecraft client = Minecraft.getInstance();
         if (shader == null || client.level == null) return;
-        Vector3f sun = sunDirection(partialTick);
+        Vector3f sun = sunDirection(partialTick, height);
         ClientLevel clock = visualLevel();
         shader.getUniform("SkyViewMat").set(pose.last().pose());
         shader.getUniform("AirHeight").set(airHeight(height));

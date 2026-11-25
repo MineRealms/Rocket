@@ -10,21 +10,30 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import urllib.request
+import urllib.parse
 import uuid
 import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = "1.20.1-forge-47.4.29"
+# SHA512 pins verified against api.modrinth.com/v2/version/{version_id}.
+RENDERER_MODS = (
+    ("sk9rgfiA", "UTbfe5d1", "embeddium-0.3.31+mc1.20.1.jar",
+     "ffbf2da4685260a4d5c14c621708bd20722563f084f042d3dfb0a7b87f048e39299648c854a93939129da0d23a15a91ec628560d601e76074b08e275f6e132e9"),
+    ("GchcoXML", "iQ1SwGc3", "oculus-mc1.20.1-1.8.0.jar",
+     "1bb4ac77400d6684347988ed298a692c2cb15cf7923693607eb8739b171a20fef7412259e9e157111d9ce21779badab386029956f7d2283a9e611722a373e9d5"),
+)
 
 
 def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def digest(path):
-    checksum = hashlib.sha1()
+def digest(path, algorithm="sha1"):
+    checksum = hashlib.new(algorithm)
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             checksum.update(block)
@@ -48,12 +57,13 @@ def permitted(entry, features):
 
 
 def ensure(artifact, destination, opener, alternatives=()):
-    expected = artifact.get("sha1")
+    algorithm = "sha512" if artifact.get("sha512") else "sha1"
+    expected = artifact.get(algorithm)
     size = artifact.get("size")
 
     def valid(path):
         return (path.is_file() and (size is None or path.stat().st_size == size)
-                and (not expected or digest(path) == expected))
+                and (not expected or digest(path, algorithm) == expected))
 
     if valid(destination):
         return destination
@@ -124,10 +134,52 @@ def stage_mods(game):
     return staged
 
 
+def stage_oculus(game, opener):
+    from install_rocket_shader import DEFAULT_SOURCE, DEFAULT_DEST
+
+    if not (DEFAULT_SOURCE / "shaders/lib/common.glsl").is_file():
+        original = ROOT.parent / "AssimpLoader/build/character-sync-owner2/shaderpacks/RocketFlow_Local"
+        if not (original / "shaders/lib/common.glsl").is_file():
+            raise RuntimeError(f"RocketFlow source missing: {original}; local copy missing: {DEFAULT_SOURCE}")
+        if DEFAULT_SOURCE.exists():
+            raise RuntimeError(f"Incomplete local RocketFlow copy: {DEFAULT_SOURCE}")
+        shutil.copytree(original, DEFAULT_SOURCE)
+    mods = game / "mods"
+    mods.mkdir(parents=True, exist_ok=True)
+    expected_names = {entry[2] for entry in RENDERER_MODS}
+    conflicts = [path.name for path in mods.glob("*.jar")
+                 if path.name.lower().startswith(("oculus", "embeddium", "rubidium"))
+                 and path.name not in expected_names]
+    if conflicts:
+        raise RuntimeError(f"Conflicting renderer jars in {mods}: {conflicts}")
+    staged = {}
+    for project, version, filename, checksum in RENDERER_MODS:
+        artifact = {"sha512": checksum,
+                    "url": f"https://cdn.modrinth.com/data/{project}/versions/{version}/"
+                           + urllib.parse.quote(filename)}
+        cached = ROOT / ".local-cache/renderer-mods" / filename
+        ensure(artifact, cached, opener)
+        target = mods / filename
+        ensure(artifact, target, opener, [cached])
+        staged[filename] = checksum
+    subprocess.run([sys.executable, str(ROOT / "tools/install_rocket_shader.py"),
+                    "--source", str(DEFAULT_SOURCE), "--destination", str(DEFAULT_DEST)], check=True)
+    config = game / "config/oculus.properties"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    lines = config.read_text(encoding="utf-8").splitlines() if config.exists() else []
+    settings = {"shaderPack": "RocketFlow_ROCKET", "enableShaders": "true"}
+    lines = [line for line in lines if line.partition("=")[0].strip() not in settings]
+    lines.extend(f"{key}={value}" for key, value in settings.items())
+    config.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return staged
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--stage-mods", action="store_true")
+    parser.add_argument("--oculus", action="store_true",
+                        help="Install pinned Oculus 1.8.0/Embeddium 0.3.31 and enable local RocketFlow_ROCKET")
     parser.add_argument("--validation-bridge", action="store_true", help="Enable a loopback Rosetta client probe on port 48792")
     parser.add_argument("--java", type=Path, default=Path(r"C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot\bin\java.exe"))
     parser.add_argument("--proxy", help="Optional HTTP proxy, e.g. http://127.0.0.1:7890")
@@ -207,6 +259,8 @@ def main():
         for future in futures:
             future.result()
     staged = stage_mods(game) if args.stage_mods else {}
+    if args.oculus:
+        staged.update(stage_oculus(game, opener))
     if args.validation_bridge:
         bootstrap = game / "RosettaRemoteDebugBridge/client/RocketValidationBridge.java"
         bootstrap.parent.mkdir(parents=True, exist_ok=True)

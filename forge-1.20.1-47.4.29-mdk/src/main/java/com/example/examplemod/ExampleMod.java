@@ -2,6 +2,7 @@ package com.example.examplemod;
 
 import com.example.examplemod.compat.immptl.DebugFlightPortalRegistry;
 import com.example.examplemod.network.FlightNetwork;
+import com.example.examplemod.network.TerrainNetwork;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
@@ -68,6 +69,7 @@ public class ExampleMod
         IEventBus modEventBus = context.getModEventBus();
         DebugFlightPortalRegistry.register(modEventBus);
         FlightNetwork.register();
+        TerrainNetwork.register();
 
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);

@@ -78,6 +78,8 @@ public final class OrbitalTerrainRenderer {
         return new Vector3f((float) (camera.x - anchorX), (float) (camera.z - anchorZ), MAP_SIZE * CELL_SIZE);
     }
 
+    public static Vector3f mapOrigin() { return new Vector3f(anchorX, anchorZ, 0); }
+
     public static void prepareSky(ShaderInstance shader, Vec3 camera, double height) {
         ensureTerrain(camera.x, camera.z);
         RenderSystem.setShaderTexture(0, TERRAIN);

@@ -27,7 +27,7 @@ com.example.examplemod.compat.immptl.ImmersivePortalsBackend.protectReturnLandin
 if(protections.containsKey(p.getUUID()) || landing.getDamageMultiplier()!=0)throw new IllegalStateException("First landing was not protected");
 com.example.examplemod.transition.FlightTransferCoordinator.logout(p);
 p.setNoGravity(false); p.getAbilities().flying=false; p.onUpdateAbilities(); p.setOnGround(false);
-p.setPos(p.getX(),com.example.examplemod.Config.flightTransitionAltitude-6,p.getZ());
+p.connection.m_9774_(p.getX(),com.example.examplemod.Config.flightTransitionAltitude-6,p.getZ(),p.getYRot(),p.getXRot());
 p.startFallFlying(); p.setDeltaMovement(new net.minecraft.world.phys.Vec3(0,1,0));
 com.example.examplemod.transition.FlightTransferCoordinator.tick(s);
 try {

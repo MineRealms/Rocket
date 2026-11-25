@@ -37,6 +37,11 @@ public class Config
                     "False removes the debug connection. Production flight requires a future registered rocket vehicle.")
             .define("debugElytraSpaceFlight", true);
 
+    private static final ForgeConfigSpec.BooleanValue GENERATE_ORBITAL_TERRAIN = BUILDER
+            .comment("Generate actual Overworld chunks for the persistent 32 km orbital LOD atlas.",
+                    "One chunk request at a time, at most five starts per second while a player is above Y=300 or in space.")
+            .define("generateOrbitalTerrain", true);
+
     public static final ForgeConfigSpec.ConfigValue<String> MAGIC_NUMBER_INTRODUCTION = BUILDER
             .comment("What you want the introduction message to be for the magic number")
             .define("magicNumberIntroduction", "The magic number is... ");
@@ -52,6 +57,7 @@ public class Config
     public static int magicNumber;
     public static volatile double flightTransitionAltitude = 1600.0;
     public static volatile boolean debugElytraSpaceFlight = true;
+    public static volatile boolean generateOrbitalTerrain = true;
     public static String magicNumberIntroduction;
     public static Set<Item> items = Set.of();
     public static volatile long loadRevision;
@@ -71,6 +77,7 @@ public class Config
         magicNumber = MAGIC_NUMBER.get();
         flightTransitionAltitude = FLIGHT_TRANSITION_ALTITUDE.get();
         debugElytraSpaceFlight = DEBUG_ELYTRA_SPACE_FLIGHT.get();
+        generateOrbitalTerrain = GENERATE_ORBITAL_TERRAIN.get();
         magicNumberIntroduction = MAGIC_NUMBER_INTRODUCTION.get();
 
         // convert the list of strings into a set of items

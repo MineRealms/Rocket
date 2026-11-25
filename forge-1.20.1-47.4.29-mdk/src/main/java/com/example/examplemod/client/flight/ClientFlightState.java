@@ -236,8 +236,8 @@ public final class ClientFlightState {
         int knownEmpty = 0;
         int compiled = 0;
         // This is the bounded arrival envelope, not a claim that the entire remote world is compiled.
-        int arrivalSection = Mth.clamp(Mth.floor(preparation.targetY() / 16),
-                target.getMinSection(), target.getMaxSection() - 1);
+        // Above-build-limit arrivals are empty air; clamping would check unrelated mountain meshes.
+        int arrivalSection = Mth.floor(preparation.targetY() / 16);
         int firstY = Math.max(target.getMinSection(), arrivalSection - 3);
         int lastY = Math.min(target.getMaxSection() - 1, arrivalSection + 3);
         for (int x = preparation.chunkX() - preparation.radius(); x <= preparation.chunkX() + preparation.radius(); x++) {
