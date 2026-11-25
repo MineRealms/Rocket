@@ -151,7 +151,7 @@ public final class ClientFlightState {
     private static boolean canCross(Player player, ResourceKey<Level> destination) {
         return enabled() && armed && locallyReady && preparation != null
                 && preparation.source().equals(player.level().dimension()) && preparation.target().equals(destination)
-                && inArrivalRegion(player) && ticks - targetFrameTick <= 20;
+                && inArrivalRegion(player);
     }
 
     @SubscribeEvent
@@ -234,7 +234,6 @@ public final class ClientFlightState {
         if (target == null || renderer == null) return "target world or renderer unavailable";
         ViewArea viewArea = ((IEWorldRenderer) renderer).ip_getBuiltChunkStorage();
         if (viewArea == null) return "target view area unavailable";
-        if (ticks - targetFrameTick > 20) return "awaiting target render pass";
         Map<Long, ChunkRenderDispatcher.RenderChunk> renderChunks = new HashMap<>();
         for (ChunkRenderDispatcher.RenderChunk renderChunk : viewArea.chunks) {
             renderChunks.put(renderChunk.getOrigin().asLong(), renderChunk);
@@ -262,6 +261,9 @@ public final class ClientFlightState {
                 }
             }
         }
+        // An entirely empty arrival volume has no geometry to draw. Do not make safe descent depend
+        // on looking at the return plane; nonempty arrivals still require a recent destination pass.
+        if (compiled > 0 && ticks - targetFrameTick > 20) return "awaiting target render pass";
         return "ready: chunks=25 compiled=" + compiled + " empty=" + knownEmpty;
     }
 

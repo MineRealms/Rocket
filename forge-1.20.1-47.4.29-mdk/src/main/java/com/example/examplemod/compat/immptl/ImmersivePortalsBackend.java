@@ -28,6 +28,8 @@ import qouteall.imm_ptl.core.api.PortalAPI;
 import qouteall.imm_ptl.core.portal.Portal;
 import qouteall.imm_ptl.core.portal.global_portals.GlobalPortalStorage;
 
+import java.util.HashMap;
+import java.util.Map;
 
 @Mod.EventBusSubscriber(modid = ExampleMod.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ImmersivePortalsBackend {
@@ -40,7 +42,7 @@ public final class ImmersivePortalsBackend {
     private static double installedAltitude = Double.NaN;
     private static boolean installedEnabled;
     private static int nextInstallAttempt;
-    private static final java.util.Set<java.util.UUID> RETURN_LANDINGS = new java.util.HashSet<>();
+    private static final Map<java.util.UUID, Long> RETURN_LANDINGS = new HashMap<>();
 
     private ImmersivePortalsBackend() {
     }
@@ -61,10 +63,11 @@ public final class ImmersivePortalsBackend {
             return;
         }
         MinecraftServer server = event.getServer();
-        RETURN_LANDINGS.removeIf(id -> {
-            ServerPlayer player = server.getPlayerList().getPlayer(id);
+        long now = server.getTickCount();
+        RETURN_LANDINGS.entrySet().removeIf(entry -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             return player == null || !player.isAlive() || !player.level().dimension().equals(Level.OVERWORLD)
-                    || player.onGround();
+                    || now > entry.getValue();
         });
         recoverLowSpacePlayers(server);
         boolean configChanged = installedEnabled != Config.debugElytraSpaceFlight
@@ -102,8 +105,9 @@ public final class ImmersivePortalsBackend {
 
     @SubscribeEvent
     public static void protectReturnLanding(LivingFallEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player && player.level().dimension().equals(Level.OVERWORLD)
-                && RETURN_LANDINGS.remove(player.getUUID())) {
+        if (event.getDistance() > 0.0F && event.getEntity() instanceof ServerPlayer player
+                && player.level().dimension().equals(Level.OVERWORLD)
+                && RETURN_LANDINGS.remove(player.getUUID()) != null) {
             event.setDistance(0);
             event.setDamageMultiplier(0);
         }
@@ -223,7 +227,11 @@ public final class ImmersivePortalsBackend {
                 && (event.getFrom().equals(SPACE_DIMENSION) || event.getTo().equals(SPACE_DIMENSION))) {
             player.fallDistance = 0;
             if (event.getFrom().equals(SPACE_DIMENSION) && event.getTo().equals(Level.OVERWORLD) && !player.isFallFlying()) {
-                RETURN_LANDINGS.add(player.getUUID());
+                // The portal can preserve the old onGround bit for one tick. Keep the
+                // protection until the actual LivingFallEvent, with an expiry to avoid
+                // carrying it into an unrelated later fall.
+                RETURN_LANDINGS.put(player.getUUID(), (long) player.getServer().getTickCount() + 1200L);
+                player.setOnGround(false);
             }
             LOGGER.info("ROCKET dimension change: player={}, {} -> {}, pos={}, velocity={}, fallFlying={}",
                     player.getGameProfile().getName(), event.getFrom().location(), event.getTo().location(),
