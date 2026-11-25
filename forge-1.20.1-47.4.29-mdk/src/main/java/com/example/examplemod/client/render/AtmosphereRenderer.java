@@ -10,12 +10,33 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Vector3f;
+import qouteall.imm_ptl.core.ClientWorldLoader;
 
 public final class AtmosphereRenderer {
+    private static float lastSunAngle;
     private AtmosphereRenderer() {}
+
+    public static void resetClock() { lastSunAngle = 0; }
+
+    public static ClientLevel visualLevel() {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null || level.dimension().equals(Level.OVERWORLD)) return level;
+        return ClientWorldLoader.getIsInitialized() ? ClientWorldLoader.getClientWorlds().stream()
+                .filter(candidate -> candidate.dimension().equals(Level.OVERWORLD)).findFirst().orElse(null) : null;
+    }
+
+    public static Vector3f sunDirection(float partialTick) {
+        ClientLevel level = visualLevel();
+        // Space has a fixed midnight; retain the last Overworld angle if its world is unavailable.
+        if (level != null) lastSunAngle = level.getSunAngle(partialTick);
+        return new Vector3f(-Mth.sin(lastSunAngle), Mth.cos(lastSunAngle), 0);
+    }
 
     public static float airHeight(double height) {
         if (!Double.isFinite(height)) return 0.05f;
@@ -27,24 +48,27 @@ public final class AtmosphereRenderer {
         return FlightMath.smoothRange(airHeight(height), 8, 90);
     }
 
-    public static void render(PoseStack pose, double height, float partialTick) {
+    public static void render(PoseStack pose, double height, float partialTick, float opacity) {
         if (!Double.isFinite(height)) return;
         ShaderInstance shader = OrbitShaders.sky();
         Minecraft client = Minecraft.getInstance();
         if (shader == null || client.level == null) return;
-        double angle = (client.level.getDayTime() % 24000 + partialTick) / 24000.0 * Math.PI * 2;
-        float sx = (float) -Math.cos(angle), sy = (float) Math.sin(angle);
+        Vector3f sun = sunDirection(partialTick);
+        ClientLevel clock = visualLevel();
         shader.getUniform("SkyViewMat").set(pose.last().pose());
         shader.getUniform("AirHeight").set(airHeight(height));
-        shader.getUniform("SunDirection").set(sx, sy, 0.12f);
+        shader.getUniform("SunDirection").set(sun.x, sun.y, sun.z);
+        shader.getUniform("SkyOpacity").set(opacity);
+        shader.getUniform("MoonPhase").set(clock != null ? (float) clock.getMoonPhase() : 0);
         shader.getUniform("OrbitFade").set(FlightMath.orbitBlend(height, ClientFlightState.transitionAltitude()));
-        shader.getUniform("RainWeight").set(client.level.getRainLevel(partialTick));
+        shader.getUniform("RainWeight").set(clock != null ? clock.getRainLevel(partialTick) : 0);
         Vec3 camera = client.gameRenderer.getMainCamera().getPosition();
         float wind = (client.level.getGameTime() % 240000 + partialTick) * 0.035f;
         shader.getUniform("CloudOffset").set((float) (camera.x % 1000000) + wind, (float) (camera.z % 1000000));
         OrbitalTerrainRenderer.prepareSky(shader, client.gameRenderer.getMainCamera().getPosition(), height);
         RenderSystem.setShader(OrbitShaders::sky);
-        RenderSystem.disableBlend();
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
         RenderSystem.depthMask(false);
         RenderSystem.disableCull();

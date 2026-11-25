@@ -4,13 +4,14 @@ uniform vec4 ColorModulator;
 uniform float VisualAltitude;
 uniform vec3 EyePosition;
 uniform vec3 FaceNormal;
+uniform vec3 SunDirection;
 in vec2 texCoord;
 in vec4 vertexColor;
 in vec3 surfacePosition;
 out vec4 fragColor;
 
 void main() {
-    vec3 sunDirection = normalize(vec3(-0.529, 0.811, 0.250));
+    vec3 sunDirection = normalize(SunDirection);
     vec3 viewDirection = normalize(EyePosition - surfacePosition);
     vec3 albedo = texture(Sampler0, texCoord).rgb;
     vec3 normal = normalize(FaceNormal);

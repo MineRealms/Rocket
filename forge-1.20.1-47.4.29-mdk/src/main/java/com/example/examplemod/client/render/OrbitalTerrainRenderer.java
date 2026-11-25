@@ -62,6 +62,22 @@ public final class OrbitalTerrainRenderer {
     public static int sampledCells() { return knownSamples; }
     public static void invalidateTerrain() { terrainInvalid = true; }
 
+    public static int terrainTexture() {
+        Vec3 camera = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+        ensureTerrain(camera.x, camera.z);
+        return terrain.getId();
+    }
+
+    public static int earthTexture(int face) {
+        return Minecraft.getInstance().getTextureManager().getTexture(EARTH[face]).getId();
+    }
+
+    public static Vector3f mapInfo() {
+        Vec3 camera = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+        ensureTerrain(camera.x, camera.z);
+        return new Vector3f((float) (camera.x - anchorX), (float) (camera.z - anchorZ), MAP_SIZE * CELL_SIZE);
+    }
+
     public static void prepareSky(ShaderInstance shader, Vec3 camera, double height) {
         ensureTerrain(camera.x, camera.z);
         RenderSystem.setShaderTexture(0, TERRAIN);
@@ -72,7 +88,8 @@ public final class OrbitalTerrainRenderer {
         shader.getUniform("TerrainBlend").set(FlightMath.smoothRange(height, 240, 640));
     }
 
-    public static void render(PoseStack pose, Vec3 camera, double height, double centerX, double centerZ, float alpha) {
+    public static void render(PoseStack pose, Vec3 camera, double height, double centerX, double centerZ, float alpha,
+                              float partialTick) {
         ShaderInstance shader = OrbitShaders.surface();
         if (shader == null) return;
         double threshold = ClientFlightState.transitionAltitude();
@@ -88,6 +105,9 @@ public final class OrbitalTerrainRenderer {
         Vector3f eye = new Vector3f((float) (camera.x - centerX), (float) altitude, (float) (camera.z - centerZ));
         eye.rotateX((float) Math.toRadians(-28 * orbit)).rotateZ((float) Math.toRadians(32 * orbit));
         shader.getUniform("EyePosition").set(eye.x, eye.y, eye.z);
+        Vector3f sun = AtmosphereRenderer.sunDirection(partialTick);
+        sun.rotateX((float) Math.toRadians(-28 * orbit)).rotateZ((float) Math.toRadians(32 * orbit));
+        shader.getUniform("SunDirection").set(sun.x, sun.y, sun.z);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.enableDepthTest();

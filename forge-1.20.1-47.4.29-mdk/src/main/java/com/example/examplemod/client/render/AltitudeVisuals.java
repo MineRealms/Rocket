@@ -69,7 +69,7 @@ public final class AltitudeVisuals {
 
         @SubscribeEvent
         public static void fogColor(ViewportEvent.ComputeFogColor event) {
-            if (!supportedPass() || event.getCamera().getFluidInCamera() != FogType.NONE) return;
+            if (!supportedPass() || ShaderpackBridge.isActive() || event.getCamera().getFluidInCamera() != FogType.NONE) return;
             float weight = AtmosphereRenderer.darkness(height(event.getCamera()));
             event.setRed(Mth.lerp(weight, event.getRed(), 0.055f));
             event.setGreen(Mth.lerp(weight, event.getGreen(), 0.09f));
@@ -78,7 +78,7 @@ public final class AltitudeVisuals {
 
         @SubscribeEvent
         public static void fogDistance(ViewportEvent.RenderFog event) {
-            if (!supportedPass() || event.getType() != FogType.NONE) return;
+            if (!supportedPass() || ShaderpackBridge.isActive() || event.getType() != FogType.NONE) return;
             float weight = FlightMath.smoothRange(height(event.getCamera()), 180,
                     ClientFlightState.transitionAltitude() * 0.7);
             if (weight <= 0) return;
@@ -94,15 +94,25 @@ public final class AltitudeVisuals {
         private WorldRender() {}
 
         @SubscribeEvent
-        public static void logout(ClientPlayerNetworkEvent.LoggingOut event) { anchored = false; }
+        public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
+            anchored = false;
+            AtmosphereRenderer.resetClock();
+        }
 
         @SubscribeEvent
         public static void planet(RenderLevelStageEvent event) {
-            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SKY || !supportedPass() || fusedPass()) return;
+            if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SKY || !supportedPass() || fusedPass()
+                    || ShaderpackBridge.isActive()) return;
             Camera camera = event.getCamera();
             if (camera.getEntity() == null) return;
             double h = height(camera);
             if (!Double.isFinite(h)) return;
+            float skyWeight = spacePass() ? 1 : FlightMath.smoothRange(h, 180, 800);
+            if (skyWeight > 0 && camera.getFluidInCamera() == FogType.NONE) {
+                try (RenderState ignored = new RenderState()) {
+                    AtmosphereRenderer.render(event.getPoseStack(), h, event.getPartialTick(), skyWeight);
+                }
+            }
             if (!anchored || (!spacePass() && h < 180)) {
                 anchorX = camera.getPosition().x;
                 anchorZ = camera.getPosition().z;
@@ -111,22 +121,18 @@ public final class AltitudeVisuals {
             float alpha = FlightMath.smoothRange(h, 240, 640);
             if (alpha <= 0.005f) return;
             try (RenderState ignored = new RenderState()) {
-                OrbitalTerrainRenderer.render(event.getPoseStack(), camera.getPosition(), h, anchorX, anchorZ, alpha);
+                OrbitalTerrainRenderer.render(event.getPoseStack(), camera.getPosition(), h, anchorX, anchorZ, alpha,
+                        event.getPartialTick());
             }
         }
     }
 
-    private static final class RocketEffects extends DimensionSpecialEffects {
-        RocketEffects() { super(128, false, SkyType.NORMAL, false, false); }
+    private static final class RocketEffects extends DimensionSpecialEffects.OverworldEffects {
 
         @Override
         public boolean renderSky(ClientLevel level, int ticks, float partialTick, PoseStack pose, Camera camera,
                                  Matrix4f projection, boolean foggy, Runnable setupFog) {
-            if (fusedPass()) return true;
-            try (RenderState ignored = new RenderState()) {
-                AtmosphereRenderer.render(pose, height(camera), partialTick);
-            }
-            return true;
+            return fusedPass();
         }
 
         @Override
@@ -146,11 +152,6 @@ public final class AltitudeVisuals {
             return spacePass() || camera.getPosition().y > 256;
         }
 
-        @Override
-        public Vec3 getBrightnessDependentFogColor(Vec3 color, float sunHeight) { return color; }
-
-        @Override
-        public boolean isFoggyAt(int x, int z) { return false; }
     }
 
     private static final class RenderState implements AutoCloseable {

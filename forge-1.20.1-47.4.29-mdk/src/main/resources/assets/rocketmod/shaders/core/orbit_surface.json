@@ -11,6 +11,7 @@
     {"name": "ColorModulator", "type": "float", "count": 4, "values": [1, 1, 1, 1]},
     {"name": "VisualAltitude", "type": "float", "count": 1, "values": [512]},
     {"name": "EyePosition", "type": "float", "count": 3, "values": [0, 512, 0]},
+    {"name": "SunDirection", "type": "float", "count": 3, "values": [0, 1, 0]},
     {"name": "FaceNormal", "type": "float", "count": 3, "values": [0, 1, 0]}
   ]
 }

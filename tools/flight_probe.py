@@ -1,12 +1,14 @@
 """Local Rosetta bridge client for repeatable ROCKET runtime checks."""
 import argparse
 import json
+import os
 from pathlib import Path
 import socket
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = ROOT / "forge-1.20.1-47.4.29-mdk/run/RosettaRemoteDebugBridge/remote-token.txt"
+TOKEN = Path(os.environ.get("ROCKET_BRIDGE_TOKEN_FILE", ROOT / "forge-1.20.1-47.4.29-mdk/run/RosettaRemoteDebugBridge/remote-token.txt"))
+PORT = int(os.environ.get("ROCKET_BRIDGE_PORT", "48790"))
 STATE = """
 net.minecraft.server.MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
 java.util.List<String> states = new java.util.ArrayList<>();
@@ -24,7 +26,7 @@ return "debug=" + com.example.examplemod.Config.debugElytraSpaceFlight
 """
 
 
-def request(command, args, port=48790, token_file=TOKEN):
+def request(command, args, port=PORT, token_file=TOKEN):
     payload = {"token": Path(token_file).read_text(encoding="utf-8").strip(), "cmd": command, "args": args}
     with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
         connection.settimeout(65)
@@ -44,7 +46,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["ping", "state", "console", "exec"])
     parser.add_argument("value", nargs="?")
-    parser.add_argument("--port", type=int, default=48790)
+    parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--token-file", type=Path, default=TOKEN)
     arguments = parser.parse_args()
     command = arguments.command

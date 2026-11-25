@@ -138,7 +138,7 @@ tasks.named('jar', Jar) {
                 'Implementation-Version'  : project.jar.archiveVersion,
                 'Implementation-Vendor'   : mod_authors
         ])
-        //attributes['MixinConfigs'] = "${mod_id}.mixins.json"
+        attributes['MixinConfigs'] = 'rocketmod.client.mixins.json'
     }
     // This artifact will not be renamed. While this will not launch in production
     // the artifact may be helpful for other developers if your mod is used as a library.

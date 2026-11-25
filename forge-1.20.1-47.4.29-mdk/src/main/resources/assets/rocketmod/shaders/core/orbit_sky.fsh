@@ -1,6 +1,8 @@
 #version 150
 uniform float AirHeight;
 uniform vec3 SunDirection;
+uniform float SkyOpacity;
+uniform float MoonPhase;
 uniform float OrbitFade;
 uniform float RainWeight;
 uniform sampler2D Sampler0;
@@ -66,7 +68,7 @@ vec3 scatter(vec3 origin, vec3 view, vec3 sun) {
     vec3 color = 18.0 * (sumR * BETA_R * phaseR + sumM * BETA_M * phaseM);
     float groundAir = exp(-AirHeight / 13.0);
     float day = smoothstep(-0.2, 0.12, sun.y);
-    color += vec3(0.012, 0.025, 0.052) * groundAir * day;
+    color += mix(vec3(0.0007, 0.0012, 0.0025), vec3(0.012, 0.025, 0.052), day) * groundAir;
     return color;
 }
 
@@ -156,9 +158,22 @@ void main() {
     float lowHaze = exp(-AirHeight / 20.0) * (1.0 - smoothstep(-0.15, 0.05, view.y));
     color += vec3(0.10, 0.15, 0.20) * lowHaze * daytime;
     float sunDisc = smoothstep(cos(0.006), cos(0.0038), dot(view, sun));
-    color += vec3(5.5, 4.9, 3.9) * sunDisc * smoothstep(-0.2, 0.0, sun.y);
+    float clearSky = 1.0 - RainWeight;
+    color += vec3(5.5, 4.9, 3.9) * sunDisc * smoothstep(-0.2, 0.0, sun.y) * clearSky;
+    vec3 moon = -sun;
+    vec3 moonRight = vec3(0.0, 0.0, 1.0);
+    vec3 moonUp = cross(moon, moonRight);
+    vec2 moonPoint = vec2(dot(view, moonRight), dot(view, moonUp)) / 0.009;
+    float moonRadius = dot(moonPoint, moonPoint);
+    if (dot(view, moon) > 0.0 && moonRadius < 1.0) {
+        float phase = MoonPhase * PI / 4.0;
+        vec3 moonNormal = vec3(moonPoint, sqrt(max(0.0, 1.0 - moonRadius)));
+        float lit = smoothstep(-0.04, 0.04, dot(moonNormal, vec3(sin(phase), 0.0, cos(phase))));
+        color += vec3(0.45, 0.48, 0.54) * lit * (1.0 - smoothstep(0.90, 1.0, moonRadius))
+            * smoothstep(-0.12, 0.0, moon.y) * clearSky;
+    }
     float nightStars = mix(0.75, 0.04, daytime) * mix(1.0, smoothstep(15.0, 75.0, AirHeight), daytime);
-    color += vec3(0.85, 0.90, 1.0) * starField(view) * nightStars;
+    color += vec3(0.85, 0.90, 1.0) * starField(view) * nightStars * clearSky;
     color = mix(color, vec3(dot(color, vec3(0.21, 0.72, 0.07))) * 0.72, RainWeight * exp(-AirHeight / 6.0));
     color = vec3(1.0) - exp(-color * 1.4);
     color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
@@ -166,5 +181,5 @@ void main() {
         float groundWeight = TerrainBlend * (1.0 - OrbitFade) * (1.0 - smoothstep(-0.025, 0.0, view.y));
         color = mix(color, groundScene(view, sun), groundWeight);
     }
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, SkyOpacity);
 }

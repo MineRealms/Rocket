@@ -232,12 +232,7 @@ public final class ClientFlightState {
                 .filter(level -> level.dimension().equals(preparation.target())).findFirst().orElse(null);
         LevelRenderer renderer = ClientWorldLoader.worldRendererMap.get(preparation.target());
         if (target == null || renderer == null) return "target world or renderer unavailable";
-        ViewArea viewArea = ((IEWorldRenderer) renderer).ip_getBuiltChunkStorage();
-        if (viewArea == null) return "target view area unavailable";
-        Map<Long, ChunkRenderDispatcher.RenderChunk> renderChunks = new HashMap<>();
-        for (ChunkRenderDispatcher.RenderChunk renderChunk : viewArea.chunks) {
-            renderChunks.put(renderChunk.getOrigin().asLong(), renderChunk);
-        }
+        Map<Long, ChunkRenderDispatcher.RenderChunk> renderChunks = null;
         int knownEmpty = 0;
         int compiled = 0;
         // This is the bounded arrival envelope, not a claim that the entire remote world is compiled.
@@ -252,6 +247,20 @@ public final class ClientFlightState {
                 for (int y = firstY; y <= lastY; y++) {
                     LevelChunkSection section = chunk.getSection(y - target.getMinSection());
                     if (section.hasOnlyAir()) { knownEmpty++; continue; }
+                    if (RendererReadiness.usesEmbeddium()) {
+                        String waiting = RendererReadiness.waitReason(renderer, x, y, z);
+                        if (waiting != null) return waiting;
+                        compiled++;
+                        continue;
+                    }
+                    if (renderChunks == null) {
+                        ViewArea viewArea = ((IEWorldRenderer) renderer).ip_getBuiltChunkStorage();
+                        if (viewArea == null) return "target view area unavailable";
+                        renderChunks = new HashMap<>();
+                        for (ChunkRenderDispatcher.RenderChunk candidate : viewArea.chunks) {
+                            if (candidate != null) renderChunks.put(candidate.getOrigin().asLong(), candidate);
+                        }
+                    }
                     ChunkRenderDispatcher.RenderChunk renderChunk = renderChunks.get(BlockPos.asLong(x * 16, y * 16, z * 16));
                     if (renderChunk == null || renderChunk.isDirty()
                             || renderChunk.getCompiledChunk() == ChunkRenderDispatcher.CompiledChunk.UNCOMPILED) {
